@@ -361,13 +361,44 @@ function App() {
     await sb.from('atendimentos').update({ status_pipeline: novoStatus }).eq('id', id);
   }
 
-  async function salvarAgendamento(dados){
-    const { error, data } = await sb.from('agendamentos').insert(dados).select();
+  async function salvarAgendamento(dados, editId){
+    if (editId) {
+      const { data, error } = await sb.from('agendamentos').update(dados).eq('id', editId).select();
+      if (error) { showToast('Erro ao salvar'); return; }
+      if (data) setAgend(prev => prev.map(a => a.id===editId ? data[0] : a));
+      setModal(null);
+      showToast('Consulta atualizada');
+      return;
+    }
+    // Novo agendamento
+    let atendimentoId = dados.atendimento_id;
+    // Avulso (ligacao/manual sem lead): cria um atendimento em Agendado pra aparecer no pipeline
+    if (!atendimentoId) {
+      const novoAtend = {
+        numero_whatsapp: dados.numero_whatsapp || null,
+        nome_paciente: dados.nome_paciente,
+        convenio: dados.convenio || null,
+        medico_id: dados.medico_id,
+        assunto: dados.assunto || 'agendamento',
+        status_pipeline: 'agendado',
+      };
+      const r = await sb.from('atendimentos').insert(novoAtend).select();
+      if (r.data && r.data[0]) { atendimentoId = r.data[0].id; setAtend(prev => [...prev, r.data[0]]); }
+    }
+    const { error, data } = await sb.from('agendamentos').insert({ ...dados, atendimento_id: atendimentoId }).select();
     if (error) { showToast('Erro ao agendar'); return; }
     if (data) setAgend(prev => [...prev, ...data]);
     if (dados.atendimento_id) await moverPipeline(dados.atendimento_id, 'agendado');
     setModal(null);
     showToast('Consulta agendada');
+  }
+
+  async function cancelarAgendamento(id){
+    const { error } = await sb.from('agendamentos').delete().eq('id', id);
+    if (error) { showToast('Erro ao cancelar'); return; }
+    setAgend(prev => prev.filter(a => a.id !== id));
+    setModal(null);
+    showToast('Consulta cancelada');
   }
 
   async function salvarPaciente(dados, id){
@@ -403,11 +434,11 @@ function App() {
       <main className="main">
         {loading ? <div className="loading"><div className="spin"></div>Carregando...</div> : (
           view==='pipeline' ? <Pipeline atend={atend} medById={medById} medicos={medicos} medColor={medColor} onMove={moverPipeline} onAgendar={(a)=>setModal({type:'agendar', atend:a})} /> :
-          view==='calendario' ? <Calendario agend={agend} medicos={medicos} medById={medById} medColor={medColor} onNovo={(dt)=>setModal({type:'agendar', data:dt})} /> :
+          view==='calendario' ? <Calendario agend={agend} medicos={medicos} medById={medById} medColor={medColor} onNovo={(dt)=>setModal({type:'agendar', data:dt})} onEditar={(ev)=>setModal({type:'agendar', evento:ev})} /> :
           <Pacientes pacientes={pacientes} atend={atend} onNovo={()=>setModal({type:'paciente'})} onEdit={(p)=>setModal({type:'paciente', paciente:p})} />
         )}
       </main>
-      {modal?.type==='agendar' && <ModalAgendar medicos={medicos} base={modal} onClose={()=>setModal(null)} onSave={salvarAgendamento} />}
+      {modal?.type==='agendar' && <ModalAgendar medicos={medicos} agend={agend} base={modal} onClose={()=>setModal(null)} onSave={salvarAgendamento} onCancelar={cancelarAgendamento} />}
       {modal?.type==='paciente' && <ModalPaciente base={modal} onClose={()=>setModal(null)} onSave={salvarPaciente} />}
       {toast && <div className="toast">{toast}</div>}
     </div>
@@ -588,7 +619,7 @@ const DIAS = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 const MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 const HORAS = Array.from({length:12},(_,i)=>i+7); // 7h as 18h
 
-function Calendario({ agend, medicos, medById, medColor, onNovo }) {
+function Calendario({ agend, medicos, medById, medColor, onNovo, onEditar }) {
   const [modo, setModo] = useState('mes');
   const [refDate, setRefDate] = useState(new Date());
   const [fMed, setFMed] = useState('');
@@ -633,9 +664,9 @@ function Calendario({ agend, medicos, medById, medColor, onNovo }) {
           </div>
           <button className="btn-primary" style={{width:'auto',padding:'9px 16px',display:'flex',alignItems:'center',gap:7}} onClick={()=>onNovo(new Date(refDate.getFullYear(),refDate.getMonth(),refDate.getDate(),9,0))}>{Ic.plus}Nova consulta</button>
         </div>
-        {modo==='mes' && <MesView refDate={refDate} evs={evs} medColor={medColor} ehHoje={ehHoje} onNovo={onNovo} />}
-        {modo==='semana' && <SemanaView refDate={refDate} evs={evs} medColor={medColor} ehHoje={ehHoje} onNovo={onNovo} />}
-        {modo==='dia' && <DiaView refDate={refDate} evs={evs} medColor={medColor} onNovo={onNovo} />}
+        {modo==='mes' && <MesView refDate={refDate} evs={evs} medColor={medColor} ehHoje={ehHoje} onNovo={onNovo} onEditar={onEditar} />}
+        {modo==='semana' && <SemanaView refDate={refDate} evs={evs} medColor={medColor} ehHoje={ehHoje} onNovo={onNovo} onEditar={onEditar} />}
+        {modo==='dia' && <DiaView refDate={refDate} evs={evs} medColor={medColor} onNovo={onNovo} onEditar={onEditar} />}
       </div>
     </>
   );
@@ -643,7 +674,7 @@ function Calendario({ agend, medicos, medById, medColor, onNovo }) {
 
 function inicioSemana(d){ const x=new Date(d); x.setDate(x.getDate()-x.getDay()); x.setHours(0,0,0,0); return x; }
 
-function MesView({ refDate, evs, medColor, ehHoje, onNovo }) {
+function MesView({ refDate, evs, medColor, ehHoje, onNovo, onEditar }) {
   const ano=refDate.getFullYear(), mes=refDate.getMonth();
   const prim=new Date(ano,mes,1), ini=new Date(prim); ini.setDate(ini.getDate()-prim.getDay());
   const dias=[]; for(let i=0;i<42;i++){ const d=new Date(ini); d.setDate(d.getDate()+i); dias.push(d); }
@@ -656,7 +687,7 @@ function MesView({ refDate, evs, medColor, ehHoje, onNovo }) {
         return (
           <div className={'day-cell'+(outro?' other':'')+(ehHoje(d)?' today':'')} key={i} onClick={()=>onNovo(new Date(d.getFullYear(),d.getMonth(),d.getDate(),9,0))}>
             <div className="day-num">{d.getDate()}</div>
-            {evd.slice(0,3).map(e=><div className="ev" key={e.id} style={{background:medColor(e.medico_id)}} title={e.nome_paciente}>{fmtHora(e.inicio)} {primeiroUltimo(e.nome_paciente)}</div>)}
+            {evd.slice(0,3).map(e=><div className="ev" key={e.id} style={{background:medColor(e.medico_id)}} title={e.nome_paciente} onClick={(ev)=>{ev.stopPropagation();onEditar(e);}}>{fmtHora(e.inicio)} {primeiroUltimo(e.nome_paciente)}</div>)}
             {evd.length>3 && <div style={{fontSize:10,color:'var(--ink-faint)',paddingLeft:2}}>+{evd.length-3} mais</div>}
           </div>
         );
@@ -665,7 +696,7 @@ function MesView({ refDate, evs, medColor, ehHoje, onNovo }) {
   );
 }
 
-function SemanaView({ refDate, evs, medColor, ehHoje, onNovo }) {
+function SemanaView({ refDate, evs, medColor, ehHoje, onNovo, onEditar }) {
   const ini=inicioSemana(refDate); const dias=Array.from({length:7},(_,i)=>{const d=new Date(ini);d.setDate(d.getDate()+i);return d;});
   return (
     <div className="cal-week">
@@ -680,7 +711,7 @@ function SemanaView({ refDate, evs, medColor, ehHoje, onNovo }) {
             {dias.map((d,i)=>{
               const cel=new Date(d); cel.setHours(h,0,0,0);
               const evh=evs.filter(e=>{const ed=new Date(e.inicio); return ed.toDateString()===d.toDateString() && ed.getHours()===h;});
-              return <div className="hour-slot" key={i} onClick={()=>onNovo(cel)}>{evh.map(e=><div className="slot-ev" key={e.id} style={{background:medColor(e.medico_id)}}>{primeiroUltimo(e.nome_paciente)}</div>)}</div>;
+              return <div className="hour-slot" key={i} onClick={()=>onNovo(cel)}>{evh.map(e=><div className="slot-ev" key={e.id} style={{background:medColor(e.medico_id)}} onClick={(ev)=>{ev.stopPropagation();onEditar(e);}}>{primeiroUltimo(e.nome_paciente)}</div>)}</div>;
             })}
           </div>
         ))}
@@ -701,7 +732,7 @@ function DiaView({ refDate, evs, medColor, onNovo }) {
           return (
             <div className="hour-row day" key={h}>
               <div className="hour-label">{h}:00</div>
-              <div className="hour-slot" onClick={()=>onNovo(cel)}>{evh.map(e=><div className="slot-ev" key={e.id} style={{background:medColor(e.medico_id)}}>{fmtHora(e.inicio)} · {e.nome_paciente} {e.origem==='ligacao'?'(ligação)':''}</div>)}</div>
+              <div className="hour-slot" onClick={()=>onNovo(cel)}>{evh.map(e=><div className="slot-ev" key={e.id} style={{background:medColor(e.medico_id)}} onClick={(ev)=>{ev.stopPropagation();onEditar(e);}}>{fmtHora(e.inicio)} · {e.nome_paciente} {e.origem==='ligacao'?'(ligação)':''}</div>)}</div>
             </div>
           );
         })}
@@ -711,63 +742,102 @@ function DiaView({ refDate, evs, medColor, onNovo }) {
 }
 
 // ---------- MODAL AGENDAR ----------
-function ModalAgendar({ medicos, base, onClose, onSave }) {
-  const pre = base.atend;
-  const dataBase = base.data || new Date(new Date().setHours(9,0,0,0));
-  const [nome, setNome] = useState(pre?.nome_paciente || '');
-  const [medId, setMedId] = useState(pre?.medico_id || (medicos[0]?.id || ''));
-  const [tel, setTel] = useState(pre?.numero_whatsapp || '');
+function ModalAgendar({ medicos, agend, base, onClose, onSave, onCancelar }) {
+  const pre = base.atend;        // lead da triagem
+  const ev = base.evento;        // agendamento existente (edicao)
+  const editando = !!ev;
+  const dataBase = ev ? new Date(ev.inicio) : (base.data || new Date(new Date().setHours(9,0,0,0)));
+  const [nome, setNome] = useState(ev?.nome_paciente || pre?.nome_paciente || '');
+  const [medId, setMedId] = useState(ev?.medico_id || pre?.medico_id || (medicos[0]?.id || ''));
+  const [tel, setTel] = useState(ev?.numero_whatsapp || pre?.numero_whatsapp || '');
   const [dia, setDia] = useState(toDateInput(dataBase));
   const [hora, setHora] = useState(toTimeInput(dataBase));
-  const [dur, setDur] = useState('30');
-  const [obs, setObs] = useState('');
-  const origem = pre ? 'triagem' : 'ligacao';
+  const [dur, setDur] = useState(ev && ev.fim ? String(Math.round((new Date(ev.fim)-new Date(ev.inicio))/60000)) : '30');
+  const [obs, setObs] = useState(ev?.observacao || '');
+  const [aviso, setAviso] = useState('');
+  const origem = ev ? ev.origem : (pre ? 'triagem' : 'ligacao');
 
-  function salvar(){
-    if (!nome.trim() || !medId || !dia || !hora) return;
+  // Detecta sobreposicao de horario no mesmo medico
+  function achaConflito(inicio, fim){
+    return agend.find(a => {
+      if (editando && a.id === ev.id) return false;   // ignora ele mesmo
+      if (a.medico_id !== +medId) return false;
+      if (a.status === 'cancelado') return false;
+      const ai = new Date(a.inicio); const af = a.fim ? new Date(a.fim) : new Date(ai.getTime()+30*60000);
+      return inicio < af && fim > ai;   // sobreposicao
+    });
+  }
+
+  function montaDados(){
     const inicio = new Date(dia+'T'+hora);
     const fim = new Date(inicio.getTime() + (+dur)*60000);
-    onSave({
-      atendimento_id: pre?.id || null,
+    return { inicio, fim };
+  }
+
+  function tentarSalvar(){
+    if (!nome.trim() || !medId || !dia || !hora) return;
+    const { inicio, fim } = montaDados();
+    const conf = achaConflito(inicio, fim);
+    if (conf && !aviso) {
+      const med = medicos.find(m=>m.id===+medId);
+      setAviso(`${med?primeiroUltimo(med.nome):'Este médico'} já tem ${conf.nome_paciente} às ${fmtHora(conf.inicio)}. Deseja agendar mesmo assim?`);
+      return;
+    }
+    confirmarSalvar(inicio, fim);
+  }
+
+  function confirmarSalvar(inicio, fim){
+    const dados = {
+      atendimento_id: ev?.atendimento_id ?? pre?.id ?? null,
       medico_id: +medId,
       nome_paciente: nome.trim(),
       numero_whatsapp: tel || null,
-      convenio: pre?.convenio || null,
-      assunto: pre?.assunto || 'agendamento',
+      convenio: ev?.convenio ?? pre?.convenio ?? null,
+      assunto: ev?.assunto ?? pre?.assunto ?? 'agendamento',
       origem,
       inicio: inicio.toISOString(),
       fim: fim.toISOString(),
       observacao: obs || null,
-    });
+    };
+    onSave(dados, ev?.id);
   }
+
+  const badgeCor = origem==='triagem'?{bg:'rgba(31,93,76,.12)',fg:'#1f5d4c',txt:'Triagem'}:{bg:'rgba(47,111,143,.12)',fg:'#2f6f8f',txt:'Ligação'};
 
   return (
     <div className="modal-bg" onClick={onClose}>
       <div className="modal" onClick={e=>e.stopPropagation()}>
         <div className="modal-head">
-          <h3 className="serif">Agendar consulta</h3>
-          <p>{pre ? 'A partir de um lead da triagem' : 'Encaixe manual ou por ligação'}
-            {' '}<span className="origin-badge" style={{background: origem==='triagem'?'rgba(31,93,76,.12)':'rgba(47,111,143,.12)', color: origem==='triagem'?'#1f5d4c':'#2f6f8f'}}>{origem==='triagem'?'Triagem':'Ligação'}</span>
+          <h3 className="serif">{editando?'Editar consulta':'Agendar consulta'}</h3>
+          <p>{editando?'Altere os dados ou cancele':pre?'A partir de um lead da triagem':'Encaixe manual ou por ligação'}
+            {' '}<span className="origin-badge" style={{background:badgeCor.bg,color:badgeCor.fg}}>{badgeCor.txt}</span>
           </p>
         </div>
         <div className="modal-body">
-          <div className="field"><label>Nome do paciente</label><input value={nome} onChange={e=>setNome(e.target.value)} placeholder="Nome completo" /></div>
+          {aviso && (
+            <div style={{background:'rgba(184,145,47,.12)',border:'1px solid rgba(184,145,47,.3)',borderRadius:10,padding:'11px 13px',marginBottom:16,fontSize:13,color:'#8a6d18'}}>
+              {aviso}
+            </div>
+          )}
+          <div className="field"><label>Nome do paciente</label><input value={nome} onChange={e=>{setNome(e.target.value);setAviso('');}} placeholder="Nome completo" /></div>
           <div className="field"><label>Médico</label>
-            <select value={medId} onChange={e=>setMedId(e.target.value)}>{medicos.map(m=><option key={m.id} value={m.id}>{m.nome}</option>)}</select>
+            <select value={medId} onChange={e=>{setMedId(e.target.value);setAviso('');}}>{medicos.map(m=><option key={m.id} value={m.id}>{m.nome}</option>)}</select>
           </div>
           <div className="field"><label>Telefone</label><input value={tel} onChange={e=>setTel(e.target.value)} placeholder="Opcional" /></div>
           <div className="row2">
-            <div className="field"><label>Data</label><input type="date" value={dia} onChange={e=>setDia(e.target.value)} /></div>
-            <div className="field"><label>Horário</label><input type="time" value={hora} onChange={e=>setHora(e.target.value)} /></div>
+            <div className="field"><label>Data</label><input type="date" value={dia} onChange={e=>{setDia(e.target.value);setAviso('');}} /></div>
+            <div className="field"><label>Horário</label><input type="time" value={hora} onChange={e=>{setHora(e.target.value);setAviso('');}} /></div>
           </div>
           <div className="field"><label>Duração</label>
-            <select value={dur} onChange={e=>setDur(e.target.value)}><option value="15">15 minutos</option><option value="30">30 minutos</option><option value="45">45 minutos</option><option value="60">1 hora</option></select>
+            <select value={dur} onChange={e=>{setDur(e.target.value);setAviso('');}}><option value="15">15 minutos</option><option value="30">30 minutos</option><option value="45">45 minutos</option><option value="60">1 hora</option></select>
           </div>
           <div className="field"><label>Observação</label><textarea value={obs} onChange={e=>setObs(e.target.value)} placeholder="Opcional" /></div>
         </div>
         <div className="modal-foot">
-          <button className="btn-ghost" onClick={onClose}>Cancelar</button>
-          <button className="btn-primary" onClick={salvar}>Agendar consulta</button>
+          {editando
+            ? <button className="btn-ghost" style={{color:'var(--rose)',borderColor:'rgba(168,74,91,.3)'}} onClick={()=>onCancelar(ev.id)}>Cancelar consulta</button>
+            : <button className="btn-ghost" onClick={onClose}>Voltar</button>}
+          <button className="btn-primary" onClick={tentarSalvar}>{aviso?'Confirmar mesmo assim':editando?'Salvar':'Agendar'}</button>
         </div>
       </div>
     </div>
