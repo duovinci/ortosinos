@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Ortosinos - Painel de Atendimento</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.24.7/babel.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.0/dist/umd/supabase.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --ink: #14201c;
+    --ink-soft: #4a5852;
+    --ink-faint: #8a968f;
+    --paper: #f6f4ee;
+    --card: #ffffff;
+    --line: #e3e0d6;
+    --line-soft: #eeece4;
+    --pine: #1f5d4c;
+    --pine-deep: #16473a;
+    --clay: #c2703d;
+    --sky: #2f6f8f;
+    --gold: #b8912f;
+    --rose: #a84a5b;
+    --shadow: 0 1px 2px rgba(20,32,28,.04), 0 4px 16px rgba(20,32,28,.05);
+    --radius: 14px;
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background: var(--paper);
+    color: var(--ink);
+    -webkit-font-smoothing: antialiased;
+  }
+  #root { height: 100%; }
+  .serif { font-family: 'Fraunces', Georgia, serif; }
+  button { font-family: inherit; cursor: pointer; border: none; background: none; color: inherit; }
+  input, select, textarea { font-family: inherit; font-size: 14px; color: var(--ink); }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #d8d5c9; border-radius: 8px; border: 3px solid var(--paper); }
+
+  /* LOGIN */
+  .login-wrap { height: 100%; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .login-card { width: 100%; max-width: 380px; background: var(--card); border: 1px solid var(--line); border-radius: 20px; padding: 40px 34px; box-shadow: var(--shadow); }
+  .login-mark { width: 44px; height: 44px; border-radius: 12px; background: var(--pine); color: #fff; display: flex; align-items: center; justify-content: center; font-family: 'Fraunces', serif; font-weight: 600; font-size: 22px; margin-bottom: 22px; }
+  .login-card h1 { font-size: 25px; font-weight: 600; margin: 0 0 4px; letter-spacing: -.02em; }
+  .login-card p.sub { color: var(--ink-faint); font-size: 14px; margin: 0 0 28px; }
+  .field { margin-bottom: 16px; }
+  .field label { display: block; font-size: 12.5px; font-weight: 500; color: var(--ink-soft); margin-bottom: 6px; }
+  .field input { width: 100%; padding: 11px 13px; border: 1px solid var(--line); border-radius: 10px; background: #fcfbf8; transition: border-color .15s, box-shadow .15s; }
+  .field input:focus { outline: none; border-color: var(--pine); box-shadow: 0 0 0 3px rgba(31,93,76,.1); background: #fff; }
+  .btn-primary { width: 100%; background: var(--pine); color: #fff; padding: 12px; border-radius: 10px; font-weight: 600; font-size: 14.5px; transition: background .15s; }
+  .btn-primary:hover { background: var(--pine-deep); }
+  .login-err { color: var(--rose); font-size: 13px; margin: 0 0 16px; padding: 9px 12px; background: rgba(168,74,91,.08); border-radius: 8px; }
+
+  /* SHELL */
+  .shell { display: flex; height: 100%; }
+  .side { width: 232px; flex-shrink: 0; background: var(--card); border-right: 1px solid var(--line); display: flex; flex-direction: column; padding: 20px 14px; }
+  .brand { display: flex; align-items: center; gap: 11px; padding: 6px 8px 20px; }
+  .brand-mark { width: 34px; height: 34px; border-radius: 9px; background: var(--pine); color: #fff; display: flex; align-items: center; justify-content: center; font-family: 'Fraunces', serif; font-weight: 600; font-size: 17px; }
+  .brand-name { font-family: 'Fraunces', serif; font-weight: 600; font-size: 16px; line-height: 1.1; }
+  .brand-name small { display: block; font-family: 'Inter', sans-serif; font-weight: 400; font-size: 11px; color: var(--ink-faint); letter-spacing: .02em; }
+  .nav-item { display: flex; align-items: center; gap: 11px; width: 100%; padding: 10px 12px; border-radius: 10px; color: var(--ink-soft); font-size: 14px; font-weight: 500; text-align: left; transition: background .13s, color .13s; }
+  .nav-item:hover { background: var(--line-soft); color: var(--ink); }
+  .nav-item.active { background: var(--pine); color: #fff; }
+  .nav-item .ic { width: 18px; height: 18px; flex-shrink: 0; }
+  .side-foot { margin-top: auto; padding-top: 16px; border-top: 1px solid var(--line-soft); }
+  .user-chip { display: flex; align-items: center; gap: 10px; padding: 8px 10px; font-size: 13px; color: var(--ink-soft); }
+  .user-av { width: 30px; height: 30px; border-radius: 50%; background: var(--clay); color: #fff; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 600; }
+  .logout-btn { font-size: 12.5px; color: var(--ink-faint); padding: 6px 10px; }
+  .logout-btn:hover { color: var(--rose); }
+
+  .main { flex: 1; overflow-y: auto; min-width: 0; }
+  .topbar { padding: 26px 34px 20px; }
+  .topbar h2 { font-family: 'Fraunces', serif; font-size: 27px; font-weight: 600; margin: 0; letter-spacing: -.02em; }
+  .topbar .crumb { font-size: 13.5px; color: var(--ink-faint); margin: 2px 0 0; }
+  .content { padding: 0 34px 40px; }
+
+  /* PIPELINE */
+  .pipe-tools { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 20px; }
+  .selectbox { position: relative; }
+  .selectbox select { appearance: none; padding: 9px 32px 9px 13px; border: 1px solid var(--line); border-radius: 9px; background: var(--card); font-size: 13.5px; font-weight: 500; color: var(--ink); cursor: pointer; }
+  .selectbox::after { content: ''; position: absolute; right: 12px; top: 50%; width: 7px; height: 7px; border-right: 1.5px solid var(--ink-faint); border-bottom: 1.5px solid var(--ink-faint); transform: translateY(-65%) rotate(45deg); pointer-events: none; }
+  .board { display: grid; grid-template-columns: repeat(4, minmax(240px, 1fr)); gap: 14px; }
+  .col { background: transparent; }
+  .col-head { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px 12px; }
+  .col-title { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 600; }
+  .col-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .col-count { font-size: 12px; color: var(--ink-faint); background: var(--line-soft); padding: 1px 8px; border-radius: 20px; }
+  .col-body { display: flex; flex-direction: column; gap: 10px; min-height: 60px; padding: 4px; border-radius: 12px; transition: background .15s; }
+  .col-body.drag-over { background: rgba(31,93,76,.06); outline: 1.5px dashed rgba(31,93,76,.3); }
+  .lead { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 13px 14px; box-shadow: var(--shadow); cursor: grab; transition: box-shadow .15s, transform .1s, border-color .15s; }
+  .lead:hover { border-color: #d4d0c4; box-shadow: 0 2px 4px rgba(20,32,28,.05), 0 8px 22px rgba(20,32,28,.07); }
+  .lead:active { cursor: grabbing; }
+  .lead.dragging { opacity: .4; }
+  .lead-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+  .lead-name { font-weight: 600; font-size: 14.5px; line-height: 1.25; }
+  .lead-sub { font-size: 12.5px; color: var(--ink-faint); margin-top: 1px; }
+  .assunto-tag { font-size: 11px; font-weight: 600; padding: 3px 9px; border-radius: 7px; white-space: nowrap; flex-shrink: 0; }
+  .lead-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+  .chip { font-size: 11.5px; padding: 2px 8px; border-radius: 6px; background: var(--line-soft); color: var(--ink-soft); font-weight: 500; }
+  .chip.ret { background: rgba(31,93,76,.1); color: var(--pine); }
+  .lead-time { font-size: 11.5px; color: var(--ink-faint); margin-left: auto; }
+  .lead-actions { display: flex; gap: 6px; margin-top: 11px; }
+  .mini-btn { flex: 1; font-size: 12px; font-weight: 500; padding: 7px; border-radius: 8px; background: var(--line-soft); color: var(--ink-soft); transition: background .13s, color .13s; }
+  .mini-btn:hover { background: var(--pine); color: #fff; }
+
+  /* PACIENTES */
+  .search { flex: 1; min-width: 200px; max-width: 340px; position: relative; }
+  .search input { width: 100%; padding: 9px 13px 9px 36px; border: 1px solid var(--line); border-radius: 9px; background: var(--card); }
+  .search input:focus { outline: none; border-color: var(--pine); box-shadow: 0 0 0 3px rgba(31,93,76,.1); }
+  .search .si { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--ink-faint); }
+  .table-wrap { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { text-align: left; font-size: 12px; font-weight: 600; color: var(--ink-faint); padding: 13px 16px; border-bottom: 1px solid var(--line); background: #fbfaf6; }
+  tbody td { padding: 13px 16px; font-size: 13.5px; border-bottom: 1px solid var(--line-soft); }
+  tbody tr:last-child td { border-bottom: none; }
+  tbody tr { transition: background .1s; }
+  tbody tr:hover { background: #fbfaf6; }
+  .pac-name { font-weight: 600; }
+  .pac-av { width: 30px; height: 30px; border-radius: 50%; background: var(--sky); color: #fff; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600; margin-right: 10px; vertical-align: middle; }
+
+  /* CALENDAR */
+  .cal-tools { display: flex; align-items: center; gap: 12px; margin-bottom: 18px; flex-wrap: wrap; }
+  .seg { display: inline-flex; background: var(--line-soft); border-radius: 9px; padding: 3px; }
+  .seg button { padding: 7px 15px; border-radius: 7px; font-size: 13px; font-weight: 500; color: var(--ink-soft); transition: all .13s; }
+  .seg button.on { background: var(--card); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.06); }
+  .cal-nav { display: flex; align-items: center; gap: 6px; }
+  .cal-nav button { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); display: flex; align-items: center; justify-content: center; color: var(--ink-soft); }
+  .cal-nav button:hover { background: var(--line-soft); }
+  .cal-label { font-family: 'Fraunces', serif; font-size: 18px; font-weight: 600; min-width: 190px; text-transform: capitalize; }
+  .grid-month { display: grid; grid-template-columns: repeat(7, 1fr); background: var(--line); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; gap: 1px; }
+  .dow { background: #fbfaf6; text-align: center; font-size: 11.5px; font-weight: 600; color: var(--ink-faint); padding: 10px 0; }
+  .day-cell { background: var(--card); min-height: 104px; padding: 8px; cursor: pointer; transition: background .12s; display: flex; flex-direction: column; gap: 4px; }
+  .day-cell:hover { background: #fbfaf6; }
+  .day-cell.other { background: #faf9f5; }
+  .day-cell.other .day-num { color: var(--ink-faint); }
+  .day-cell.today .day-num { background: var(--pine); color: #fff; }
+  .day-num { font-size: 12.5px; font-weight: 600; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border-radius: 7px; }
+  .ev { font-size: 11px; padding: 3px 7px; border-radius: 6px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #fff; }
+  .cal-week, .cal-day { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .wk-head { display: grid; border-bottom: 1px solid var(--line); }
+  .wk-head.week { grid-template-columns: 56px repeat(7, 1fr); }
+  .wk-head.day { grid-template-columns: 56px 1fr; }
+  .wk-head > div { padding: 10px 8px; text-align: center; font-size: 12px; font-weight: 600; color: var(--ink-soft); border-left: 1px solid var(--line-soft); }
+  .wk-head > div:first-child { border-left: none; }
+  .wk-head .wd-num { font-family: 'Fraunces', serif; font-size: 17px; display: block; margin-top: 2px; }
+  .wk-head .wd-num.today { color: var(--pine); }
+  .wk-body { max-height: 560px; overflow-y: auto; }
+  .hour-row { display: grid; min-height: 52px; border-bottom: 1px solid var(--line-soft); }
+  .hour-row.week { grid-template-columns: 56px repeat(7, 1fr); }
+  .hour-row.day { grid-template-columns: 56px 1fr; }
+  .hour-label { font-size: 11px; color: var(--ink-faint); padding: 4px 8px; text-align: right; }
+  .hour-slot { border-left: 1px solid var(--line-soft); padding: 3px; cursor: pointer; transition: background .1s; position: relative; }
+  .hour-slot:hover { background: rgba(31,93,76,.05); }
+  .slot-ev { font-size: 11px; padding: 4px 7px; border-radius: 6px; color: #fff; font-weight: 500; margin-bottom: 2px; line-height: 1.3; }
+
+  /* MODAL */
+  .modal-bg { position: fixed; inset: 0; background: rgba(20,32,28,.4); backdrop-filter: blur(2px); display: flex; align-items: center; justify-content: center; padding: 20px; z-index: 50; }
+  .modal { background: var(--card); border-radius: 18px; width: 100%; max-width: 460px; max-height: 90vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(20,32,28,.25); }
+  .modal-head { padding: 22px 24px 0; }
+  .modal-head h3 { font-family: 'Fraunces', serif; font-size: 21px; font-weight: 600; margin: 0; }
+  .modal-head p { font-size: 13px; color: var(--ink-faint); margin: 3px 0 0; }
+  .modal-body { padding: 20px 24px; }
+  .modal-foot { padding: 16px 24px 22px; display: flex; gap: 10px; }
+  .modal-foot .btn-primary { flex: 1; }
+  .btn-ghost { padding: 12px 18px; border-radius: 10px; border: 1px solid var(--line); font-weight: 500; font-size: 14px; color: var(--ink-soft); }
+  .btn-ghost:hover { background: var(--line-soft); }
+  .field select { width: 100%; padding: 11px 13px; border: 1px solid var(--line); border-radius: 10px; background: #fcfbf8; appearance: none; cursor: pointer; }
+  .field textarea { width: 100%; padding: 11px 13px; border: 1px solid var(--line); border-radius: 10px; background: #fcfbf8; resize: vertical; min-height: 64px; }
+  .field select:focus, .field textarea:focus { outline: none; border-color: var(--pine); box-shadow: 0 0 0 3px rgba(31,93,76,.1); }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .origin-badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 6px; }
+
+  .empty { text-align: center; padding: 50px 20px; color: var(--ink-faint); }
+  .empty .serif { font-size: 18px; color: var(--ink-soft); display: block; margin-bottom: 6px; }
+  .loading { display: flex; align-items: center; justify-content: center; height: 100%; color: var(--ink-faint); gap: 10px; }
+  .spin { width: 18px; height: 18px; border: 2px solid var(--line); border-top-color: var(--pine); border-radius: 50%; animation: sp 0.7s linear infinite; }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 12px 20px; border-radius: 10px; font-size: 13.5px; font-weight: 500; box-shadow: 0 8px 24px rgba(0,0,0,.2); z-index: 100; animation: rise .25s ease; }
+  @keyframes rise { from { opacity: 0; transform: translate(-50%, 8px); } }
+
+  @media (max-width: 920px) {
+    .board { grid-auto-flow: column; grid-template-columns: none; grid-auto-columns: 82%; overflow-x: auto; }
+    .side { width: 64px; padding: 20px 8px; }
+    .brand-name, .nav-item span, .user-chip .uc-txt, .side-foot .logout-btn span { display: none; }
+    .nav-item { justify-content: center; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useMemo, useCallback } = React;
+
+// ---- CONFIG ----
+const SUPABASE_URL = "https://vmiptszijvmefnnmrfgy.supabase.co";
+const SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZtaXB0c3ppanZtZWZubm1yZmd5Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODMzNTg3MDMsImV4cCI6MjA5ODkzNDcwM30.FWKCASPdHxeVj0gZ9hIW8AnyE1g9XQOopz0WTEOuSVw";
+const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ===== LOGIN TEMPORARIO DE TESTE — TROCAR POR SUPABASE AUTH ANTES DE PRODUCAO =====
+const USUARIOS = [
+  { email: "recepcao@ortosinos.com.br", senha: "ortosinos123", nome: "Recepção" },
+  { email: "enzo@duovinci.com.br", senha: "duovinci", nome: "Enzo" },
+];
+// ==================================================================================
+
+const COLS = [
+  { key: 'aguardando', label: 'Aguardando', color: '#b8912f' },
+  { key: 'agendado', label: 'Agendado', color: '#2f6f8f' },
+  { key: 'pos_consulta', label: 'Pós-consulta', color: '#c2703d' },
+  { key: 'finalizado', label: 'Finalizado', color: '#1f5d4c' },
+];
+const ASSUNTOS = {
+  agendamento: { label: 'Agendamento', bg: 'rgba(47,111,143,.12)', fg: '#2f6f8f' },
+  documento: { label: 'Documento', bg: 'rgba(184,145,47,.14)', fg: '#8a6d18' },
+  revisao: { label: 'Revisão', bg: 'rgba(194,112,61,.14)', fg: '#a85a28' },
+  duvida: { label: 'Dúvida', bg: 'rgba(31,93,76,.12)', fg: '#1f5d4c' },
+  outro: { label: 'Outro', bg: 'var(--line-soft)', fg: '#4a5852' },
+};
+const MED_CORES = ['#1f5d4c','#2f6f8f','#c2703d','#b8912f','#a84a5b','#6b4e8f','#3c7a5a'];
+
+function iniciais(nome){ return (nome||'?').split(' ').filter(Boolean).slice(0,2).map(p=>p[0].toUpperCase()).join(''); }
+function primeiroUltimo(nome){ const p=(nome||'').split(' ').filter(Boolean); return p.length>1?p[0]+' '+p[p.length-1]:nome; }
+function tempoRel(iso){ const d=(Date.now()-new Date(iso))/60000; if(d<1)return'agora'; if(d<60)return Math.floor(d)+'min'; if(d<1440)return Math.floor(d/60)+'h'; return Math.floor(d/1440)+'d'; }
+function fmtHora(iso){ return new Date(iso).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'}); }
+
+// ---------- LOGIN ----------
+function Login({ onLogin }) {
+  const [email, setEmail] = useState('');
+  const [senha, setSenha] = useState('');
+  const [err, setErr] = useState('');
+  function entrar() {
+    const u = USUARIOS.find(x => x.email.toLowerCase() === email.trim().toLowerCase() && x.senha === senha);
+    if (!u) { setErr('E-mail ou senha incorretos.'); return; }
+    localStorage.setItem('orto_user', JSON.stringify({ email: u.email, nome: u.nome }));
+    onLogin({ email: u.email, nome: u.nome });
+  }
+  return (
+    <div className="login-wrap">
+      <div className="login-card">
+        <div className="login-mark serif">O</div>
+        <h1 className="serif">Consultório Ortosinos</h1>
+        <p className="sub">Painel de atendimento da recepção</p>
+        {err && <p className="login-err">{err}</p>}
+        <div className="field">
+          <label>E-mail</label>
+          <input type="email" value={email} onChange={e=>setEmail(e.target.value)} onKeyDown={e=>e.key==='Enter'&&entrar()} placeholder="voce@ortosinos.com.br" />
+        </div>
+        <div className="field">
+          <label>Senha</label>
+          <input type="password" value={senha} onChange={e=>setSenha(e.target.value)} onKeyDown={e=>e.key==='Enter'&&entrar()} placeholder="••••••••" />
+        </div>
+        <button className="btn-primary" onClick={entrar}>Entrar</button>
+      </div>
+    </div>
+  );
+}
+
+// ---------- ICONES ----------
+const Ic = {
+  pipe: <svg className="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="5" height="16" rx="1"/><rect x="10" y="4" width="5" height="10" rx="1"/><rect x="17" y="4" width="4" height="13" rx="1"/></svg>,
+  cal: <svg className="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg>,
+  users: <svg className="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6M16 14c2.5 0 5 2 5 6"/><circle cx="17" cy="8" r="2.5"/></svg>,
+  search: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>,
+  chevL: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>,
+  chevR: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>,
+  plus: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M12 5v14M5 12h14"/></svg>,
+};
+
+// ---------- APP ----------
+function App() {
+  const [user, setUser] = useState(() => { try { return JSON.parse(localStorage.getItem('orto_user')); } catch { return null; } });
+  const [view, setView] = useState('pipeline');
+  const [medicos, setMedicos] = useState([]);
+  const [atend, setAtend] = useState([]);
+  const [agend, setAgend] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState('');
+  const [modal, setModal] = useState(null);
+
+  const showToast = useCallback((m) => { setToast(m); setTimeout(()=>setToast(''), 2200); }, []);
+
+  const carregar = useCallback(async () => {
+    setLoading(true);
+    const [m, a, g] = await Promise.all([
+      sb.from('medicos').select('*').eq('ativo', true).order('id'),
+      sb.from('atendimentos').select('*').order('criado_em', { ascending: true }),
+      sb.from('agendamentos').select('*').order('inicio'),
+    ]);
+    if (m.data) setMedicos(m.data);
+    if (a.data) setAtend(a.data);
+    if (g.data) setAgend(g.data);
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { if (user) carregar(); }, [user, carregar]);
+
+  const medById = useMemo(() => Object.fromEntries(medicos.map(m => [m.id, m])), [medicos]);
+  const medColor = useCallback((id) => MED_CORES[(medicos.findIndex(m=>m.id===id)) % MED_CORES.length] || '#1f5d4c', [medicos]);
+
+  if (!user) return <Login onLogin={setUser} />;
+
+  function sair(){ localStorage.removeItem('orto_user'); setUser(null); }
+
+  async function moverPipeline(id, novoStatus){
+    setAtend(prev => prev.map(a => a.id===id ? {...a, status_pipeline: novoStatus} : a));
+    await sb.from('atendimentos').update({ status_pipeline: novoStatus }).eq('id', id);
+  }
+
+  async function salvarAgendamento(dados){
+    const { error, data } = await sb.from('agendamentos').insert(dados).select();
+    if (error) { showToast('Erro ao agendar'); return; }
+    if (data) setAgend(prev => [...prev, ...data]);
+    if (dados.atendimento_id) await moverPipeline(dados.atendimento_id, 'agendado');
+    setModal(null);
+    showToast('Consulta agendada');
+  }
+
+  return (
+    <div className="shell">
+      <aside className="side">
+        <div className="brand">
+          <div className="brand-mark serif">O</div>
+          <div className="brand-name serif">Ortosinos<small>Recepção</small></div>
+        </div>
+        <button className={'nav-item'+(view==='pipeline'?' active':'')} onClick={()=>setView('pipeline')}>{Ic.pipe}<span>Atendimentos</span></button>
+        <button className={'nav-item'+(view==='calendario'?' active':'')} onClick={()=>setView('calendario')}>{Ic.cal}<span>Calendário</span></button>
+        <button className={'nav-item'+(view==='pacientes'?' active':'')} onClick={()=>setView('pacientes')}>{Ic.users}<span>Pacientes</span></button>
+        <div className="side-foot">
+          <div className="user-chip"><div className="user-av">{iniciais(user.nome)}</div><span className="uc-txt">{user.nome}</span></div>
+          <button className="logout-btn" onClick={sair}><span>Sair</span></button>
+        </div>
+      </aside>
+      <main className="main">
+        {loading ? <div className="loading"><div className="spin"></div>Carregando...</div> : (
+          view==='pipeline' ? <Pipeline atend={atend} medById={medById} medicos={medicos} medColor={medColor} onMove={moverPipeline} onAgendar={(a)=>setModal({type:'agendar', atend:a})} /> :
+          view==='calendario' ? <Calendario agend={agend} medicos={medicos} medById={medById} medColor={medColor} onNovo={(dt)=>setModal({type:'agendar', data:dt})} /> :
+          <Pacientes atend={atend} medById={medById} />
+        )}
+      </main>
+      {modal?.type==='agendar' && <ModalAgendar medicos={medicos} base={modal} onClose={()=>setModal(null)} onSave={salvarAgendamento} />}
+      {toast && <div className="toast">{toast}</div>}
+    </div>
+  );
+}
+
+// ---------- PIPELINE ----------
+function Pipeline({ atend, medById, medicos, medColor, onMove, onAgendar }) {
+  const [fMed, setFMed] = useState('');
+  const [fAss, setFAss] = useState('');
+  const [dragId, setDragId] = useState(null);
+  const [overCol, setOverCol] = useState(null);
+
+  const filtrado = useMemo(() => atend.filter(a =>
+    (!fMed || a.medico_id === +fMed) && (!fAss || a.assunto === fAss)
+  ), [atend, fMed, fAss]);
+
+  function drop(col){ if(dragId){ onMove(dragId, col); setDragId(null); setOverCol(null); } }
+
+  return (
+    <>
+      <div className="topbar">
+        <h2 className="serif">Atendimentos</h2>
+        <p className="crumb">Leads da triagem, em ordem de chegada</p>
+      </div>
+      <div className="content">
+        <div className="pipe-tools">
+          <div className="selectbox">
+            <select value={fMed} onChange={e=>setFMed(e.target.value)}>
+              <option value="">Todos os médicos</option>
+              {medicos.map(m => <option key={m.id} value={m.id}>{primeiroUltimo(m.nome)}</option>)}
+            </select>
+          </div>
+          <div className="selectbox">
+            <select value={fAss} onChange={e=>setFAss(e.target.value)}>
+              <option value="">Todos os assuntos</option>
+              {Object.entries(ASSUNTOS).map(([k,v]) => <option key={k} value={k}>{v.label}</option>)}
+            </select>
+          </div>
+          {(fMed||fAss) && <button className="mini-btn" style={{flex:'none',padding:'8px 14px'}} onClick={()=>{setFMed('');setFAss('');}}>Limpar filtros</button>}
+        </div>
+        <div className="board">
+          {COLS.map(col => {
+            const items = filtrado.filter(a => a.status_pipeline === col.key);
+            return (
+              <div className="col" key={col.key}>
+                <div className="col-head">
+                  <div className="col-title"><span className="col-dot" style={{background:col.color}}></span>{col.label}</div>
+                  <span className="col-count">{items.length}</span>
+                </div>
+                <div className={'col-body'+(overCol===col.key?' drag-over':'')}
+                  onDragOver={e=>{e.preventDefault();setOverCol(col.key);}}
+                  onDragLeave={()=>setOverCol(null)}
+                  onDrop={()=>drop(col.key)}>
+                  {items.map(a => (
+                    <LeadCard key={a.id} a={a} med={medById[a.medico_id]} medColor={medColor} onAgendar={onAgendar}
+                      onDragStart={()=>setDragId(a.id)} onDragEnd={()=>setDragId(null)} dragging={dragId===a.id} />
+                  ))}
+                  {items.length===0 && <div style={{fontSize:12,color:'var(--ink-faint)',textAlign:'center',padding:'14px 0'}}>Vazio</div>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function LeadCard({ a, med, medColor, onAgendar, onDragStart, onDragEnd, dragging }) {
+  const ass = ASSUNTOS[a.assunto] || ASSUNTOS.outro;
+  return (
+    <div className={'lead'+(dragging?' dragging':'')} draggable onDragStart={onDragStart} onDragEnd={onDragEnd}>
+      <div className="lead-top">
+        <div>
+          <div className="lead-name">{a.nome_paciente || 'Sem nome'}</div>
+          <div className="lead-sub">{med ? primeiroUltimo(med.nome) : 'Sem médico'}</div>
+        </div>
+        <span className="assunto-tag" style={{background:ass.bg,color:ass.fg}}>{ass.label}</span>
+      </div>
+      <div className="lead-meta">
+        <span className={'chip'+(a.tipo_paciente==='retorno'?' ret':'')}>{a.tipo_paciente==='retorno'?'Retorno':'1ª vez'}</span>
+        <span className="chip">{a.convenio==='particular'?'Particular':'Convênio'}</span>
+        <span className="lead-time">{tempoRel(a.criado_em)}</span>
+      </div>
+      {a.status_pipeline==='aguardando' && (
+        <div className="lead-actions">
+          <button className="mini-btn" onClick={()=>onAgendar(a)}>Agendar consulta</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------- PACIENTES ----------
+function Pacientes({ atend, medById }) {
+  const [q, setQ] = useState('');
+  const unicos = useMemo(() => {
+    const map = new Map();
+    atend.forEach(a => {
+      const k = a.numero_whatsapp || a.id;
+      if (!map.has(k)) map.set(k, { ...a, visitas: 1 });
+      else { const e = map.get(k); e.visitas++; if (new Date(a.criado_em) > new Date(e.criado_em)) { e.criado_em = a.criado_em; e.medico_id = a.medico_id; e.assunto = a.assunto; } }
+    });
+    let arr = [...map.values()];
+    if (q) arr = arr.filter(p => (p.nome_paciente||'').toLowerCase().includes(q.toLowerCase()) || (p.numero_whatsapp||'').includes(q));
+    return arr.sort((a,b)=> (a.nome_paciente||'').localeCompare(b.nome_paciente||''));
+  }, [atend, q]);
+
+  return (
+    <>
+      <div className="topbar"><h2 className="serif">Pacientes</h2><p className="crumb">{unicos.length} pacientes registrados</p></div>
+      <div className="content">
+        <div className="pipe-tools">
+          <div className="search"><span className="si">{Ic.search}</span><input placeholder="Buscar por nome ou telefone" value={q} onChange={e=>setQ(e.target.value)} /></div>
+        </div>
+        {unicos.length===0 ? <div className="empty"><span className="serif">Nenhum paciente ainda</span>Os pacientes aparecem aqui após passarem pela triagem no WhatsApp.</div> : (
+          <div className="table-wrap">
+            <table>
+              <thead><tr><th>Paciente</th><th>Telefone</th><th>Tipo</th><th>Convênio</th><th>Último médico</th><th>Visitas</th></tr></thead>
+              <tbody>
+                {unicos.map(p => (
+                  <tr key={p.numero_whatsapp||p.id}>
+                    <td><span className="pac-av">{iniciais(p.nome_paciente)}</span><span className="pac-name">{p.nome_paciente||'Sem nome'}</span></td>
+                    <td>{p.numero_whatsapp||'—'}</td>
+                    <td>{p.tipo_paciente==='retorno'?'Retorno':'1ª vez'}</td>
+                    <td>{p.convenio==='particular'?'Particular':'Convênio'}</td>
+                    <td>{medById[p.medico_id]?primeiroUltimo(medById[p.medico_id].nome):'—'}</td>
+                    <td>{p.visitas}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ---------- CALENDARIO ----------
+const DIAS = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
+const MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
+const HORAS = Array.from({length:12},(_,i)=>i+7); // 7h as 18h
+
+function Calendario({ agend, medicos, medById, medColor, onNovo }) {
+  const [modo, setModo] = useState('mes');
+  const [ref, setRef] = useState(new Date());
+  const [fMed, setFMed] = useState('');
+
+  const evs = useMemo(() => agend.filter(a => !fMed || a.medico_id === +fMed), [agend, fMed]);
+  const hoje = new Date(); const ehHoje = (d)=> d.toDateString()===hoje.toDateString();
+
+  function nav(dir){
+    const d = new Date(ref);
+    if (modo==='mes') d.setMonth(d.getMonth()+dir);
+    else if (modo==='semana') d.setDate(d.getDate()+dir*7);
+    else d.setDate(d.getDate()+dir);
+    setRef(d);
+  }
+  function label(){
+    if (modo==='mes') return MESES[ref.getMonth()]+' '+ref.getFullYear();
+    if (modo==='dia') return ref.getDate()+' de '+MESES[ref.getMonth()];
+    const ini = inicioSemana(ref); const fim = new Date(ini); fim.setDate(fim.getDate()+6);
+    return ini.getDate()+' – '+fim.getDate()+' '+MESES[fim.getMonth()];
+  }
+
+  return (
+    <>
+      <div className="topbar"><h2 className="serif">Calendário</h2><p className="crumb">Agenda de consultas por médico</p></div>
+      <div className="content">
+        <div className="cal-tools">
+          <div className="seg">
+            <button className={modo==='mes'?'on':''} onClick={()=>setModo('mes')}>Mês</button>
+            <button className={modo==='semana'?'on':''} onClick={()=>setModo('semana')}>Semana</button>
+            <button className={modo==='dia'?'on':''} onClick={()=>setModo('dia')}>Dia</button>
+          </div>
+          <div className="cal-nav">
+            <button onClick={()=>nav(-1)}>{Ic.chevL}</button>
+            <div className="cal-label serif">{label()}</div>
+            <button onClick={()=>nav(1)}>{Ic.chevR}</button>
+          </div>
+          <div className="selectbox" style={{marginLeft:'auto'}}>
+            <select value={fMed} onChange={e=>setFMed(e.target.value)}>
+              <option value="">Todos os médicos</option>
+              {medicos.map(m => <option key={m.id} value={m.id}>{primeiroUltimo(m.nome)}</option>)}
+            </select>
+          </div>
+          <button className="btn-primary" style={{width:'auto',padding:'9px 16px',display:'flex',alignItems:'center',gap:7}} onClick={()=>onNovo(new Date(ref.getFullYear(),ref.getMonth(),ref.getDate(),9,0))}>{Ic.plus}Nova consulta</button>
+        </div>
+        {modo==='mes' && <MesView ref={ref} evs={evs} medColor={medColor} ehHoje={ehHoje} onNovo={onNovo} />}
+        {modo==='semana' && <SemanaView ref={ref} evs={evs} medColor={medColor} ehHoje={ehHoje} onNovo={onNovo} />}
+        {modo==='dia' && <DiaView ref={ref} evs={evs} medColor={medColor} onNovo={onNovo} />}
+      </div>
+    </>
+  );
+}
+
+function inicioSemana(d){ const x=new Date(d); x.setDate(x.getDate()-x.getDay()); x.setHours(0,0,0,0); return x; }
+
+function MesView({ ref, evs, medColor, ehHoje, onNovo }) {
+  const ano=ref.getFullYear(), mes=ref.getMonth();
+  const prim=new Date(ano,mes,1), ini=new Date(prim); ini.setDate(ini.getDate()-prim.getDay());
+  const dias=[]; for(let i=0;i<42;i++){ const d=new Date(ini); d.setDate(d.getDate()+i); dias.push(d); }
+  const evsDia=(d)=>evs.filter(e=>new Date(e.inicio).toDateString()===d.toDateString());
+  return (
+    <div className="grid-month">
+      {DIAS.map(d=><div className="dow" key={d}>{d.toUpperCase()}</div>)}
+      {dias.map((d,i)=>{
+        const evd=evsDia(d); const outro=d.getMonth()!==mes;
+        return (
+          <div className={'day-cell'+(outro?' other':'')+(ehHoje(d)?' today':'')} key={i} onClick={()=>onNovo(new Date(d.getFullYear(),d.getMonth(),d.getDate(),9,0))}>
+            <div className="day-num">{d.getDate()}</div>
+            {evd.slice(0,3).map(e=><div className="ev" key={e.id} style={{background:medColor(e.medico_id)}} title={e.nome_paciente}>{fmtHora(e.inicio)} {primeiroUltimo(e.nome_paciente)}</div>)}
+            {evd.length>3 && <div style={{fontSize:10,color:'var(--ink-faint)',paddingLeft:2}}>+{evd.length-3} mais</div>}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function SemanaView({ ref, evs, medColor, ehHoje, onNovo }) {
+  const ini=inicioSemana(ref); const dias=Array.from({length:7},(_,i)=>{const d=new Date(ini);d.setDate(d.getDate()+i);return d;});
+  return (
+    <div className="cal-week">
+      <div className="wk-head week">
+        <div></div>
+        {dias.map((d,i)=><div key={i}>{DIAS[i]}<span className={'wd-num'+(ehHoje(d)?' today':'')}>{d.getDate()}</span></div>)}
+      </div>
+      <div className="wk-body">
+        {HORAS.map(h=>(
+          <div className="hour-row week" key={h}>
+            <div className="hour-label">{h}:00</div>
+            {dias.map((d,i)=>{
+              const cel=new Date(d); cel.setHours(h,0,0,0);
+              const evh=evs.filter(e=>{const ed=new Date(e.inicio); return ed.toDateString()===d.toDateString() && ed.getHours()===h;});
+              return <div className="hour-slot" key={i} onClick={()=>onNovo(cel)}>{evh.map(e=><div className="slot-ev" key={e.id} style={{background:medColor(e.medico_id)}}>{primeiroUltimo(e.nome_paciente)}</div>)}</div>;
+            })}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DiaView({ ref, evs, medColor, onNovo }) {
+  const evsDia=evs.filter(e=>new Date(e.inicio).toDateString()===ref.toDateString());
+  return (
+    <div className="cal-day">
+      <div className="wk-head day"><div></div><div>{DIAS[ref.getDay()]}, {ref.getDate()} de {MESES[ref.getMonth()]}</div></div>
+      <div className="wk-body">
+        {HORAS.map(h=>{
+          const cel=new Date(ref); cel.setHours(h,0,0,0);
+          const evh=evsDia.filter(e=>new Date(e.inicio).getHours()===h);
+          return (
+            <div className="hour-row day" key={h}>
+              <div className="hour-label">{h}:00</div>
+              <div className="hour-slot" onClick={()=>onNovo(cel)}>{evh.map(e=><div className="slot-ev" key={e.id} style={{background:medColor(e.medico_id)}}>{fmtHora(e.inicio)} · {e.nome_paciente} {e.origem==='ligacao'?'(ligação)':''}</div>)}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ---------- MODAL AGENDAR ----------
+function ModalAgendar({ medicos, base, onClose, onSave }) {
+  const pre = base.atend;
+  const dataBase = base.data || new Date(new Date().setHours(9,0,0,0));
+  const [nome, setNome] = useState(pre?.nome_paciente || '');
+  const [medId, setMedId] = useState(pre?.medico_id || (medicos[0]?.id || ''));
+  const [tel, setTel] = useState(pre?.numero_whatsapp || '');
+  const [dia, setDia] = useState(toDateInput(dataBase));
+  const [hora, setHora] = useState(toTimeInput(dataBase));
+  const [dur, setDur] = useState('30');
+  const [obs, setObs] = useState('');
+  const origem = pre ? 'triagem' : 'ligacao';
+
+  function salvar(){
+    if (!nome.trim() || !medId || !dia || !hora) return;
+    const inicio = new Date(dia+'T'+hora);
+    const fim = new Date(inicio.getTime() + (+dur)*60000);
+    onSave({
+      atendimento_id: pre?.id || null,
+      medico_id: +medId,
+      nome_paciente: nome.trim(),
+      numero_whatsapp: tel || null,
+      convenio: pre?.convenio || null,
+      assunto: pre?.assunto || 'agendamento',
+      origem,
+      inicio: inicio.toISOString(),
+      fim: fim.toISOString(),
+      observacao: obs || null,
+    });
+  }
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e=>e.stopPropagation()}>
+        <div className="modal-head">
+          <h3 className="serif">Agendar consulta</h3>
+          <p>{pre ? 'A partir de um lead da triagem' : 'Encaixe manual ou por ligação'}
+            {' '}<span className="origin-badge" style={{background: origem==='triagem'?'rgba(31,93,76,.12)':'rgba(47,111,143,.12)', color: origem==='triagem'?'#1f5d4c':'#2f6f8f'}}>{origem==='triagem'?'Triagem':'Ligação'}</span>
+          </p>
+        </div>
+        <div className="modal-body">
+          <div className="field"><label>Nome do paciente</label><input value={nome} onChange={e=>setNome(e.target.value)} placeholder="Nome completo" /></div>
+          <div className="field"><label>Médico</label>
+            <select value={medId} onChange={e=>setMedId(e.target.value)}>{medicos.map(m=><option key={m.id} value={m.id}>{m.nome}</option>)}</select>
+          </div>
+          <div className="field"><label>Telefone</label><input value={tel} onChange={e=>setTel(e.target.value)} placeholder="Opcional" /></div>
+          <div className="row2">
+            <div className="field"><label>Data</label><input type="date" value={dia} onChange={e=>setDia(e.target.value)} /></div>
+            <div className="field"><label>Horário</label><input type="time" value={hora} onChange={e=>setHora(e.target.value)} /></div>
+          </div>
+          <div className="field"><label>Duração</label>
+            <select value={dur} onChange={e=>setDur(e.target.value)}><option value="15">15 minutos</option><option value="30">30 minutos</option><option value="45">45 minutos</option><option value="60">1 hora</option></select>
+          </div>
+          <div className="field"><label>Observação</label><textarea value={obs} onChange={e=>setObs(e.target.value)} placeholder="Opcional" /></div>
+        </div>
+        <div className="modal-foot">
+          <button className="btn-ghost" onClick={onClose}>Cancelar</button>
+          <button className="btn-primary" onClick={salvar}>Agendar consulta</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+function toDateInput(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
+function toTimeInput(d){ return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
