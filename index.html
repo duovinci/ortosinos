@@ -361,6 +361,18 @@ function App() {
     await sb.from('atendimentos').update({ status_pipeline: novoStatus }).eq('id', id);
   }
 
+  async function upsertPaciente({ nome, numero_whatsapp, convenio, tipo_paciente }){
+    if (!nome) return;
+    // Se ja existe paciente com esse telefone, nao duplica
+    if (numero_whatsapp) {
+      const existe = pacientes.find(p => p.numero_whatsapp === numero_whatsapp);
+      if (existe) return;
+    }
+    const novo = { nome, numero_whatsapp: numero_whatsapp || null, convenio: convenio || null, tipo_paciente: tipo_paciente || null };
+    const { data } = await sb.from('pacientes').insert(novo).select();
+    if (data && data[0]) setPacientes(prev => [...prev, data[0]].sort((a,b)=>a.nome.localeCompare(b.nome)));
+  }
+
   async function salvarAgendamento(dados, editId){
     if (editId) {
       const { data, error } = await sb.from('agendamentos').update(dados).eq('id', editId).select();
@@ -372,7 +384,7 @@ function App() {
     }
     // Novo agendamento
     let atendimentoId = dados.atendimento_id;
-    // Avulso (ligacao/manual sem lead): cria um atendimento em Agendado pra aparecer no pipeline
+    // Avulso (sem lead da triagem): cria atendimento em Agendado pra aparecer no pipeline
     if (!atendimentoId) {
       const novoAtend = {
         numero_whatsapp: dados.numero_whatsapp || null,
@@ -383,12 +395,15 @@ function App() {
         status_pipeline: 'agendado',
       };
       const r = await sb.from('atendimentos').insert(novoAtend).select();
+      if (r.error) { showToast('Erro ao criar atendimento: '+r.error.message); return; }
       if (r.data && r.data[0]) { atendimentoId = r.data[0].id; setAtend(prev => [...prev, r.data[0]]); }
     }
     const { error, data } = await sb.from('agendamentos').insert({ ...dados, atendimento_id: atendimentoId }).select();
     if (error) { showToast('Erro ao agendar'); return; }
     if (data) setAgend(prev => [...prev, ...data]);
     if (dados.atendimento_id) await moverPipeline(dados.atendimento_id, 'agendado');
+    // Cadastra o paciente automaticamente
+    await upsertPaciente({ nome: dados.nome_paciente, numero_whatsapp: dados.numero_whatsapp, convenio: dados.convenio });
     setModal(null);
     showToast('Consulta agendada');
   }
