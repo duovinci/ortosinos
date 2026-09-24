@@ -279,10 +279,12 @@ const Ic = {
 // ---------- APP ----------
 function App() {
   const [user, setUser] = useState(() => { try { return JSON.parse(localStorage.getItem('orto_user')); } catch { return null; } });
-  const [view, setView] = useState('pipeline');
+  const [view, setViewRaw] = useState(() => localStorage.getItem('orto_view') || 'pipeline');
+  const setView = useCallback((v) => { localStorage.setItem('orto_view', v); setViewRaw(v); }, []);
   const [medicos, setMedicos] = useState([]);
   const [atend, setAtend] = useState([]);
   const [agend, setAgend] = useState([]);
+  const [pacientes, setPacientes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState('');
   const [modal, setModal] = useState(null);
@@ -291,14 +293,16 @@ function App() {
 
   const carregar = useCallback(async () => {
     setLoading(true);
-    const [m, a, g] = await Promise.all([
+    const [m, a, g, p] = await Promise.all([
       sb.from('medicos').select('*').eq('ativo', true).order('id'),
       sb.from('atendimentos').select('*').order('criado_em', { ascending: true }),
       sb.from('agendamentos').select('*').order('inicio'),
+      sb.from('pacientes').select('*').order('nome'),
     ]);
     if (m.data) setMedicos(m.data);
     if (a.data) setAtend(a.data);
     if (g.data) setAgend(g.data);
+    if (p.data) setPacientes(p.data);
     setLoading(false);
   }, []);
 
@@ -325,6 +329,21 @@ function App() {
     showToast('Consulta agendada');
   }
 
+  async function salvarPaciente(dados, id){
+    if (id) {
+      const { data, error } = await sb.from('pacientes').update(dados).eq('id', id).select();
+      if (error) { showToast('Erro ao salvar'); return; }
+      if (data) setPacientes(prev => prev.map(p => p.id===id ? data[0] : p).sort((a,b)=>a.nome.localeCompare(b.nome)));
+      showToast('Paciente atualizado');
+    } else {
+      const { data, error } = await sb.from('pacientes').insert(dados).select();
+      if (error) { showToast('Erro ao cadastrar'); return; }
+      if (data) setPacientes(prev => [...prev, ...data].sort((a,b)=>a.nome.localeCompare(b.nome)));
+      showToast('Paciente cadastrado');
+    }
+    setModal(null);
+  }
+
   return (
     <div className="shell">
       <aside className="side">
@@ -344,10 +363,11 @@ function App() {
         {loading ? <div className="loading"><div className="spin"></div>Carregando...</div> : (
           view==='pipeline' ? <Pipeline atend={atend} medById={medById} medicos={medicos} medColor={medColor} onMove={moverPipeline} onAgendar={(a)=>setModal({type:'agendar', atend:a})} /> :
           view==='calendario' ? <Calendario agend={agend} medicos={medicos} medById={medById} medColor={medColor} onNovo={(dt)=>setModal({type:'agendar', data:dt})} /> :
-          <Pacientes atend={atend} medById={medById} />
+          <Pacientes pacientes={pacientes} atend={atend} onNovo={()=>setModal({type:'paciente'})} onEdit={(p)=>setModal({type:'paciente', paciente:p})} />
         )}
       </main>
       {modal?.type==='agendar' && <ModalAgendar medicos={medicos} base={modal} onClose={()=>setModal(null)} onSave={salvarAgendamento} />}
+      {modal?.type==='paciente' && <ModalPaciente base={modal} onClose={()=>setModal(null)} onSave={salvarPaciente} />}
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
@@ -442,40 +462,38 @@ function LeadCard({ a, med, medColor, onAgendar, onDragStart, onDragEnd, draggin
 }
 
 // ---------- PACIENTES ----------
-function Pacientes({ atend, medById }) {
+function Pacientes({ pacientes, atend, onNovo, onEdit }) {
   const [q, setQ] = useState('');
-  const unicos = useMemo(() => {
-    const map = new Map();
-    atend.forEach(a => {
-      const k = a.numero_whatsapp || a.id;
-      if (!map.has(k)) map.set(k, { ...a, visitas: 1 });
-      else { const e = map.get(k); e.visitas++; if (new Date(a.criado_em) > new Date(e.criado_em)) { e.criado_em = a.criado_em; e.medico_id = a.medico_id; e.assunto = a.assunto; } }
-    });
-    let arr = [...map.values()];
-    if (q) arr = arr.filter(p => (p.nome_paciente||'').toLowerCase().includes(q.toLowerCase()) || (p.numero_whatsapp||'').includes(q));
-    return arr.sort((a,b)=> (a.nome_paciente||'').localeCompare(b.nome_paciente||''));
-  }, [atend, q]);
+  const visitasPorTel = useMemo(() => {
+    const m = {}; atend.forEach(a => { if(a.numero_whatsapp) m[a.numero_whatsapp]=(m[a.numero_whatsapp]||0)+1; }); return m;
+  }, [atend]);
+  const lista = useMemo(() => {
+    let arr = pacientes;
+    if (q) arr = arr.filter(p => (p.nome||'').toLowerCase().includes(q.toLowerCase()) || (p.numero_whatsapp||'').includes(q));
+    return arr;
+  }, [pacientes, q]);
 
   return (
     <>
-      <div className="topbar"><h2 className="serif">Pacientes</h2><p className="crumb">{unicos.length} pacientes registrados</p></div>
+      <div className="topbar"><h2 className="serif">Pacientes</h2><p className="crumb">{pacientes.length} pacientes cadastrados</p></div>
       <div className="content">
         <div className="pipe-tools">
           <div className="search"><span className="si">{Ic.search}</span><input placeholder="Buscar por nome ou telefone" value={q} onChange={e=>setQ(e.target.value)} /></div>
+          <button className="btn-primary" style={{width:'auto',padding:'9px 16px',display:'flex',alignItems:'center',gap:7,marginLeft:'auto'}} onClick={onNovo}>{Ic.plus}Novo paciente</button>
         </div>
-        {unicos.length===0 ? <div className="empty"><span className="serif">Nenhum paciente ainda</span>Os pacientes aparecem aqui após passarem pela triagem no WhatsApp.</div> : (
+        {lista.length===0 ? <div className="empty"><span className="serif">Nenhum paciente encontrado</span>{q?'Tente outra busca.':'Cadastre o primeiro paciente ou aguarde a triagem no WhatsApp.'}</div> : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Paciente</th><th>Telefone</th><th>Tipo</th><th>Convênio</th><th>Último médico</th><th>Visitas</th></tr></thead>
+              <thead><tr><th>Paciente</th><th>Telefone</th><th>Tipo</th><th>Convênio</th><th>Contatos</th><th></th></tr></thead>
               <tbody>
-                {unicos.map(p => (
-                  <tr key={p.numero_whatsapp||p.id}>
-                    <td><span className="pac-av">{iniciais(p.nome_paciente)}</span><span className="pac-name">{p.nome_paciente||'Sem nome'}</span></td>
+                {lista.map(p => (
+                  <tr key={p.id} onClick={()=>onEdit(p)} style={{cursor:'pointer'}}>
+                    <td><span className="pac-av">{iniciais(p.nome)}</span><span className="pac-name">{p.nome}</span></td>
                     <td>{p.numero_whatsapp||'—'}</td>
-                    <td>{p.tipo_paciente==='retorno'?'Retorno':'1ª vez'}</td>
-                    <td>{p.convenio==='particular'?'Particular':'Convênio'}</td>
-                    <td>{medById[p.medico_id]?primeiroUltimo(medById[p.medico_id].nome):'—'}</td>
-                    <td>{p.visitas}</td>
+                    <td>{p.tipo_paciente==='retorno'?'Retorno':p.tipo_paciente==='novo'?'1ª vez':'—'}</td>
+                    <td>{p.convenio==='particular'?'Particular':p.convenio?'Convênio':'—'}</td>
+                    <td>{visitasPorTel[p.numero_whatsapp]||0}</td>
+                    <td style={{textAlign:'right',color:'var(--ink-faint)',fontSize:12}}>Editar</td>
                   </tr>
                 ))}
               </tbody>
@@ -487,6 +505,38 @@ function Pacientes({ atend, medById }) {
   );
 }
 
+function ModalPaciente({ base, onClose, onSave }) {
+  const ed = base.paciente;
+  const [nome, setNome] = useState(ed?.nome || '');
+  const [tel, setTel] = useState(ed?.numero_whatsapp || '');
+  const [conv, setConv] = useState(ed?.convenio || 'convenio');
+  const [tipo, setTipo] = useState(ed?.tipo_paciente || 'novo');
+  const [nasc, setNasc] = useState(ed?.data_nascimento || '');
+  const [obs, setObs] = useState(ed?.observacao || '');
+  function salvar(){
+    if (!nome.trim()) return;
+    onSave({ nome: nome.trim(), numero_whatsapp: tel||null, convenio: conv, tipo_paciente: tipo, data_nascimento: nasc||null, observacao: obs||null }, ed?.id);
+  }
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e=>e.stopPropagation()}>
+        <div className="modal-head"><h3 className="serif">{ed?'Editar paciente':'Novo paciente'}</h3><p>{ed?'Atualize os dados do cadastro':'Cadastre um paciente manualmente'}</p></div>
+        <div className="modal-body">
+          <div className="field"><label>Nome completo</label><input value={nome} onChange={e=>setNome(e.target.value)} placeholder="Nome do paciente" /></div>
+          <div className="field"><label>Telefone</label><input value={tel} onChange={e=>setTel(e.target.value)} placeholder="Opcional" /></div>
+          <div className="row2">
+            <div className="field"><label>Tipo</label><select value={tipo} onChange={e=>setTipo(e.target.value)}><option value="novo">1ª vez</option><option value="retorno">Retorno</option></select></div>
+            <div className="field"><label>Convênio</label><select value={conv} onChange={e=>setConv(e.target.value)}><option value="convenio">Convênio</option><option value="particular">Particular</option></select></div>
+          </div>
+          <div className="field"><label>Data de nascimento</label><input type="date" value={nasc} onChange={e=>setNasc(e.target.value)} /></div>
+          <div className="field"><label>Observação</label><textarea value={obs} onChange={e=>setObs(e.target.value)} placeholder="Opcional" /></div>
+        </div>
+        <div className="modal-foot"><button className="btn-ghost" onClick={onClose}>Cancelar</button><button className="btn-primary" onClick={salvar}>{ed?'Salvar alterações':'Cadastrar'}</button></div>
+      </div>
+    </div>
+  );
+}
+
 // ---------- CALENDARIO ----------
 const DIAS = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 const MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
@@ -494,23 +544,23 @@ const HORAS = Array.from({length:12},(_,i)=>i+7); // 7h as 18h
 
 function Calendario({ agend, medicos, medById, medColor, onNovo }) {
   const [modo, setModo] = useState('mes');
-  const [ref, setRef] = useState(new Date());
+  const [refDate, setRefDate] = useState(new Date());
   const [fMed, setFMed] = useState('');
 
   const evs = useMemo(() => agend.filter(a => !fMed || a.medico_id === +fMed), [agend, fMed]);
   const hoje = new Date(); const ehHoje = (d)=> d.toDateString()===hoje.toDateString();
 
   function nav(dir){
-    const d = new Date(ref);
+    const d = new Date(refDate);
     if (modo==='mes') d.setMonth(d.getMonth()+dir);
     else if (modo==='semana') d.setDate(d.getDate()+dir*7);
     else d.setDate(d.getDate()+dir);
-    setRef(d);
+    setRefDate(d);
   }
   function label(){
-    if (modo==='mes') return MESES[ref.getMonth()]+' '+ref.getFullYear();
-    if (modo==='dia') return ref.getDate()+' de '+MESES[ref.getMonth()];
-    const ini = inicioSemana(ref); const fim = new Date(ini); fim.setDate(fim.getDate()+6);
+    if (modo==='mes') return MESES[refDate.getMonth()]+' '+refDate.getFullYear();
+    if (modo==='dia') return refDate.getDate()+' de '+MESES[refDate.getMonth()];
+    const ini = inicioSemana(refDate); const fim = new Date(ini); fim.setDate(fim.getDate()+6);
     return ini.getDate()+' – '+fim.getDate()+' '+MESES[fim.getMonth()];
   }
 
@@ -535,11 +585,11 @@ function Calendario({ agend, medicos, medById, medColor, onNovo }) {
               {medicos.map(m => <option key={m.id} value={m.id}>{primeiroUltimo(m.nome)}</option>)}
             </select>
           </div>
-          <button className="btn-primary" style={{width:'auto',padding:'9px 16px',display:'flex',alignItems:'center',gap:7}} onClick={()=>onNovo(new Date(ref.getFullYear(),ref.getMonth(),ref.getDate(),9,0))}>{Ic.plus}Nova consulta</button>
+          <button className="btn-primary" style={{width:'auto',padding:'9px 16px',display:'flex',alignItems:'center',gap:7}} onClick={()=>onNovo(new Date(refDate.getFullYear(),refDate.getMonth(),refDate.getDate(),9,0))}>{Ic.plus}Nova consulta</button>
         </div>
-        {modo==='mes' && <MesView ref={ref} evs={evs} medColor={medColor} ehHoje={ehHoje} onNovo={onNovo} />}
-        {modo==='semana' && <SemanaView ref={ref} evs={evs} medColor={medColor} ehHoje={ehHoje} onNovo={onNovo} />}
-        {modo==='dia' && <DiaView ref={ref} evs={evs} medColor={medColor} onNovo={onNovo} />}
+        {modo==='mes' && <MesView refDate={refDate} evs={evs} medColor={medColor} ehHoje={ehHoje} onNovo={onNovo} />}
+        {modo==='semana' && <SemanaView refDate={refDate} evs={evs} medColor={medColor} ehHoje={ehHoje} onNovo={onNovo} />}
+        {modo==='dia' && <DiaView refDate={refDate} evs={evs} medColor={medColor} onNovo={onNovo} />}
       </div>
     </>
   );
@@ -547,8 +597,8 @@ function Calendario({ agend, medicos, medById, medColor, onNovo }) {
 
 function inicioSemana(d){ const x=new Date(d); x.setDate(x.getDate()-x.getDay()); x.setHours(0,0,0,0); return x; }
 
-function MesView({ ref, evs, medColor, ehHoje, onNovo }) {
-  const ano=ref.getFullYear(), mes=ref.getMonth();
+function MesView({ refDate, evs, medColor, ehHoje, onNovo }) {
+  const ano=refDate.getFullYear(), mes=refDate.getMonth();
   const prim=new Date(ano,mes,1), ini=new Date(prim); ini.setDate(ini.getDate()-prim.getDay());
   const dias=[]; for(let i=0;i<42;i++){ const d=new Date(ini); d.setDate(d.getDate()+i); dias.push(d); }
   const evsDia=(d)=>evs.filter(e=>new Date(e.inicio).toDateString()===d.toDateString());
@@ -569,8 +619,8 @@ function MesView({ ref, evs, medColor, ehHoje, onNovo }) {
   );
 }
 
-function SemanaView({ ref, evs, medColor, ehHoje, onNovo }) {
-  const ini=inicioSemana(ref); const dias=Array.from({length:7},(_,i)=>{const d=new Date(ini);d.setDate(d.getDate()+i);return d;});
+function SemanaView({ refDate, evs, medColor, ehHoje, onNovo }) {
+  const ini=inicioSemana(refDate); const dias=Array.from({length:7},(_,i)=>{const d=new Date(ini);d.setDate(d.getDate()+i);return d;});
   return (
     <div className="cal-week">
       <div className="wk-head week">
@@ -593,14 +643,14 @@ function SemanaView({ ref, evs, medColor, ehHoje, onNovo }) {
   );
 }
 
-function DiaView({ ref, evs, medColor, onNovo }) {
-  const evsDia=evs.filter(e=>new Date(e.inicio).toDateString()===ref.toDateString());
+function DiaView({ refDate, evs, medColor, onNovo }) {
+  const evsDia=evs.filter(e=>new Date(e.inicio).toDateString()===refDate.toDateString());
   return (
     <div className="cal-day">
-      <div className="wk-head day"><div></div><div>{DIAS[ref.getDay()]}, {ref.getDate()} de {MESES[ref.getMonth()]}</div></div>
+      <div className="wk-head day"><div></div><div>{DIAS[refDate.getDay()]}, {refDate.getDate()} de {MESES[refDate.getMonth()]}</div></div>
       <div className="wk-body">
         {HORAS.map(h=>{
-          const cel=new Date(ref); cel.setHours(h,0,0,0);
+          const cel=new Date(refDate); cel.setHours(h,0,0,0);
           const evh=evsDia.filter(e=>new Date(e.inicio).getHours()===h);
           return (
             <div className="hour-row day" key={h}>
