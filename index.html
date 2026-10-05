@@ -113,6 +113,11 @@
   .lead-actions { display: flex; gap: 6px; margin-top: 11px; }
   .mini-btn { flex: 1; font-size: 12px; font-weight: 500; padding: 7px; border-radius: 8px; background: var(--line-soft); color: var(--ink-soft); transition: background .13s, color .13s; }
   .mini-btn:hover { background: var(--pine); color: #fff; }
+  .wa-btn { flex: none !important; width: 38px; display: flex; align-items: center; justify-content: center; padding: 0; }
+  .mini-btn.stop:hover { background: var(--rose); color: #fff; }
+  .card-status { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 6px; }
+  .card-status.humano { background: rgba(168,74,91,.12); color: var(--rose); }
+  .card-status.bot { background: rgba(31,93,76,.1); color: var(--pine); }
 
   /* PACIENTES */
   .search { flex: 1; min-width: 200px; max-width: 340px; position: relative; }
@@ -315,7 +320,21 @@ const Ic = {
   chevL: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6"/></svg>,
   chevR: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 18l6-6-6-6"/></svg>,
   plus: <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2"><path d="M12 5v14M5 12h14"/></svg>,
+  whats: <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3.5 20.5l1.3-4.2A8.5 8.5 0 1 1 8 19.3z"/><path d="M9 9.5c.3 1.8 1.7 3.9 4.5 5l1.2-1.2 1.8.8v1.3c-3.2.5-7.4-2.5-8.1-6.4H9.8L9 9.5z"/></svg>,
 };
+
+// Abre a conversa no WhatsApp (Web no computador, app no celular), sempre na mesma aba
+function linkWhats(n){
+  const d = (n || '').replace(/\D/g, '');
+  if (!d) return null;
+  const mobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+  return mobile ? 'https://wa.me/' + d : 'https://web.whatsapp.com/send?phone=' + d;
+}
+function abrirWhats(n, e){
+  if (e) e.stopPropagation();
+  const u = linkWhats(n);
+  if (u) window.open(u, 'whatsapp-orto');
+}
 
 // ---------- APP ----------
 function App() {
@@ -326,6 +345,7 @@ function App() {
   const [atend, setAtend] = useState([]);
   const [agend, setAgend] = useState([]);
   const [pacientes, setPacientes] = useState([]);
+  const [sessoes, setSessoes] = useState([]);
   const [loading, setLoading] = useState(true);
   const [toast, setToast] = useState('');
   const [modal, setModal] = useState(null);
@@ -334,16 +354,18 @@ function App() {
 
   const carregar = useCallback(async () => {
     setLoading(true);
-    const [m, a, g, p] = await Promise.all([
+    const [m, a, g, p, s] = await Promise.all([
       sb.from('medicos').select('*').eq('ativo', true).order('id'),
       sb.from('atendimentos').select('*').order('criado_em', { ascending: true }),
       sb.from('agendamentos').select('*').order('inicio'),
       sb.from('pacientes').select('*').order('nome'),
+      sb.from('sessoes').select('numero_whatsapp,status'),
     ]);
     if (m.data) setMedicos(m.data);
     if (a.data) setAtend(a.data);
     if (g.data) setAgend(g.data);
     if (p.data) setPacientes(p.data);
+    if (s.data) setSessoes(s.data);
     setLoading(false);
   }, []);
 
@@ -359,6 +381,31 @@ function App() {
   async function moverPipeline(id, novoStatus){
     setAtend(prev => prev.map(a => a.id===id ? {...a, status_pipeline: novoStatus} : a));
     await sb.from('atendimentos').update({ status_pipeline: novoStatus }).eq('id', id);
+  }
+
+  async function salvarAtendimento(id, dados){
+    const { data, error } = await sb.from('atendimentos').update(dados).eq('id', id).select();
+    if (error) { showToast('Erro ao salvar'); return; }
+    if (data) setAtend(prev => prev.map(a => a.id===id ? data[0] : a));
+    setModal(null);
+    showToast('Atendimento atualizado');
+  }
+
+  // Status do bot por numero (bot = respondendo / humano = parado)
+  const statusPorNumero = useMemo(() => Object.fromEntries(sessoes.map(s => [s.numero_whatsapp, s.status])), [sessoes]);
+
+  async function alternarBot(numero, parar){
+    if (!numero) { showToast('Sem telefone para controlar o bot'); return; }
+    const novo = parar ? 'humano' : 'bot';
+    // upsert: cria a sessao se nao existir, senao atualiza o status
+    const { error } = await sb.from('sessoes').upsert({ numero_whatsapp: numero, status: novo }, { onConflict: 'numero_whatsapp' });
+    if (error) { showToast('Erro ao mudar o bot'); return; }
+    setSessoes(prev => {
+      const existe = prev.find(s => s.numero_whatsapp === numero);
+      if (existe) return prev.map(s => s.numero_whatsapp===numero ? {...s, status: novo} : s);
+      return [...prev, { numero_whatsapp: numero, status: novo }];
+    });
+    showToast(parar ? 'Bot pausado nesta conversa' : 'Bot reativado');
   }
 
   async function upsertPaciente({ nome, numero_whatsapp, convenio, tipo_paciente }){
@@ -448,20 +495,21 @@ function App() {
       </aside>
       <main className="main">
         {loading ? <div className="loading"><div className="spin"></div>Carregando...</div> : (
-          view==='pipeline' ? <Pipeline atend={atend} medById={medById} medicos={medicos} medColor={medColor} onMove={moverPipeline} onAgendar={(a)=>setModal({type:'agendar', atend:a})} /> :
+          view==='pipeline' ? <Pipeline atend={atend} medById={medById} medicos={medicos} medColor={medColor} onMove={moverPipeline} onAgendar={(a)=>setModal({type:'agendar', atend:a})} onDetalhes={(a)=>setModal({type:'detalhes', atend:a})} statusPorNumero={statusPorNumero} onAlternarBot={alternarBot} /> :
           view==='calendario' ? <Calendario agend={agend} medicos={medicos} medById={medById} medColor={medColor} onNovo={(dt)=>setModal({type:'agendar', data:dt})} onEditar={(ev)=>setModal({type:'agendar', evento:ev})} /> :
           <Pacientes pacientes={pacientes} atend={atend} onNovo={()=>setModal({type:'paciente'})} onEdit={(p)=>setModal({type:'paciente', paciente:p})} />
         )}
       </main>
       {modal?.type==='agendar' && <ModalAgendar medicos={medicos} agend={agend} user={user} base={modal} onClose={()=>setModal(null)} onSave={salvarAgendamento} onCancelar={cancelarAgendamento} />}
       {modal?.type==='paciente' && <ModalPaciente base={modal} onClose={()=>setModal(null)} onSave={salvarPaciente} />}
+      {modal?.type==='detalhes' && <ModalDetalhes a={modal.atend} medicos={medicos} medById={medById} statusBot={statusPorNumero[modal.atend.numero_whatsapp]} onAlternarBot={alternarBot} onClose={()=>setModal(null)} onSalvar={salvarAtendimento} onAgendar={(a)=>setModal({type:'agendar', atend:a})} />}
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
 }
 
 // ---------- PIPELINE ----------
-function Pipeline({ atend, medById, medicos, medColor, onMove, onAgendar }) {
+function Pipeline({ atend, medById, medicos, medColor, onMove, onAgendar, onDetalhes, statusPorNumero, onAlternarBot }) {
   const [fMed, setFMed] = useState('');
   const [fAss, setFAss] = useState('');
   const [dragId, setDragId] = useState(null);
@@ -510,6 +558,7 @@ function Pipeline({ atend, medById, medicos, medColor, onMove, onAgendar }) {
                   onDrop={()=>drop(col.key)}>
                   {items.map(a => (
                     <LeadCard key={a.id} a={a} med={medById[a.medico_id]} medColor={medColor} onAgendar={onAgendar} onMove={onMove}
+                      onDetalhes={onDetalhes} statusBot={statusPorNumero[a.numero_whatsapp]} onAlternarBot={onAlternarBot}
                       onDragStart={()=>setDragId(a.id)} onDragEnd={()=>setDragId(null)} dragging={dragId===a.id} />
                   ))}
                   {items.length===0 && <div style={{fontSize:12,color:'var(--ink-faint)',textAlign:'center',padding:'14px 0'}}>Vazio</div>}
@@ -523,11 +572,12 @@ function Pipeline({ atend, medById, medicos, medColor, onMove, onAgendar }) {
   );
 }
 
-function LeadCard({ a, med, medColor, onAgendar, onDragStart, onDragEnd, dragging, onMove }) {
+function LeadCard({ a, med, medColor, onAgendar, onDragStart, onDragEnd, dragging, onMove, onDetalhes, statusBot, onAlternarBot }) {
   const ass = ASSUNTOS[a.assunto] || ASSUNTOS.outro;
   const idx = COLS.findIndex(c => c.key === a.status_pipeline);
+  const parado = statusBot === 'humano';
   return (
-    <div className={'lead'+(dragging?' dragging':'')} draggable onDragStart={onDragStart} onDragEnd={onDragEnd}>
+    <div className={'lead'+(dragging?' dragging':'')} draggable onDragStart={onDragStart} onDragEnd={onDragEnd} onClick={()=>onDetalhes(a)}>
       <div className="lead-top">
         <div>
           <div className="lead-name">{a.nome_paciente || 'Sem nome'}</div>
@@ -538,17 +588,18 @@ function LeadCard({ a, med, medColor, onAgendar, onDragStart, onDragEnd, draggin
       <div className="lead-meta">
         <span className={'chip'+(a.tipo_paciente==='retorno'?' ret':'')}>{a.tipo_paciente==='retorno'?'Retorno':'1ª vez'}</span>
         <span className="chip">{a.convenio==='particular'?'Particular':'Convênio'}</span>
+        {parado && <span className="card-status humano">Bot pausado</span>}
         <span className="lead-time">{tempoRel(a.criado_em)}</span>
       </div>
       <div className="lead-move">
-        <button disabled={idx<=0} onClick={()=>onMove(a.id, COLS[idx-1].key)} title="Voltar fase">←</button>
-        <button disabled={idx>=COLS.length-1} onClick={()=>onMove(a.id, COLS[idx+1].key)} title="Avançar fase">→</button>
+        <button disabled={idx<=0} onClick={(e)=>{e.stopPropagation();onMove(a.id, COLS[idx-1].key);}} title="Voltar fase">←</button>
+        <button disabled={idx>=COLS.length-1} onClick={(e)=>{e.stopPropagation();onMove(a.id, COLS[idx+1].key);}} title="Avançar fase">→</button>
       </div>
-      {a.status_pipeline==='aguardando' && (
-        <div className="lead-actions">
-          <button className="mini-btn" onClick={()=>onAgendar(a)}>Agendar consulta</button>
-        </div>
-      )}
+      <div className="lead-actions">
+        {a.status_pipeline==='aguardando' && <button className="mini-btn" onClick={(e)=>{e.stopPropagation();onAgendar(a);}}>Agendar</button>}
+        {a.numero_whatsapp && <button className="mini-btn wa-btn" title="Abrir conversa no WhatsApp" onClick={(e)=>abrirWhats(a.numero_whatsapp, e)}>{Ic.whats}</button>}
+        {a.numero_whatsapp && <button className={'mini-btn'+(parado?'':' stop')} onClick={(e)=>{e.stopPropagation();onAlternarBot(a.numero_whatsapp, !parado);}} title={parado?'Reativar bot':'Pausar bot'}>{parado?'Reativar':'Parar bot'}</button>}
+      </div>
     </div>
   );
 }
@@ -751,6 +802,69 @@ function DiaView({ refDate, evs, medColor, onNovo }) {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+// ---------- MODAL DETALHES DO CARD ----------
+function ModalDetalhes({ a, medicos, medById, statusBot, onAlternarBot, onClose, onSalvar, onAgendar }) {
+  const [edit, setEdit] = useState(false);
+  const [nome, setNome] = useState(a.nome_paciente || '');
+  const [medId, setMedId] = useState(a.medico_id || '');
+  const [assunto, setAssunto] = useState(a.assunto || 'agendamento');
+  const [tipo, setTipo] = useState(a.tipo_paciente || 'novo');
+  const [conv, setConv] = useState(a.convenio || 'convenio');
+  const parado = statusBot === 'humano';
+  const med = medById[a.medico_id];
+  const ass = ASSUNTOS[a.assunto] || ASSUNTOS.outro;
+  const faseAtual = COLS.find(c => c.key === a.status_pipeline);
+
+  function salvar(){
+    onSalvar(a.id, { nome_paciente: nome.trim(), medico_id: medId?+medId:null, assunto, tipo_paciente: tipo, convenio: conv });
+  }
+
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e=>e.stopPropagation()}>
+        <div className="modal-head">
+          <h3 className="serif">{edit?'Editar atendimento':'Detalhes do atendimento'}</h3>
+          <p>{faseAtual?faseAtual.label:'—'} {parado && <span className="card-status humano" style={{marginLeft:6}}>Bot pausado</span>}</p>
+        </div>
+        <div className="modal-body">
+          {!edit ? (
+            <div style={{display:'flex',flexDirection:'column',gap:11}}>
+              <div><div style={{fontSize:12,color:'var(--ink-faint)'}}>Paciente</div><div style={{fontSize:15,fontWeight:600}}>{a.nome_paciente||'Sem nome'}</div></div>
+              <div><div style={{fontSize:12,color:'var(--ink-faint)'}}>Médico</div><div style={{fontSize:14}}>{med?med.nome:'Não definido'}</div></div>
+              <div style={{display:'flex',gap:20}}>
+                <div><div style={{fontSize:12,color:'var(--ink-faint)'}}>Assunto</div><div style={{fontSize:14}}>{ass.label}</div></div>
+                <div><div style={{fontSize:12,color:'var(--ink-faint)'}}>Tipo</div><div style={{fontSize:14}}>{a.tipo_paciente==='retorno'?'Retorno':'1ª vez'}</div></div>
+                <div><div style={{fontSize:12,color:'var(--ink-faint)'}}>Pagamento</div><div style={{fontSize:14}}>{a.convenio==='particular'?'Particular':'Convênio'}</div></div>
+              </div>
+              <div><div style={{fontSize:12,color:'var(--ink-faint)'}}>Telefone</div><div style={{fontSize:14}}>{a.numero_whatsapp||'—'}</div></div>
+            </div>
+          ) : (
+            <>
+              <div className="field"><label>Nome do paciente</label><input value={nome} onChange={e=>setNome(e.target.value)} /></div>
+              <div className="field"><label>Médico</label><select value={medId} onChange={e=>setMedId(e.target.value)}><option value="">Não definido</option>{medicos.map(m=><option key={m.id} value={m.id}>{m.nome}</option>)}</select></div>
+              <div className="row2">
+                <div className="field"><label>Assunto</label><select value={assunto} onChange={e=>setAssunto(e.target.value)}>{Object.entries(ASSUNTOS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select></div>
+                <div className="field"><label>Tipo</label><select value={tipo} onChange={e=>setTipo(e.target.value)}><option value="novo">1ª vez</option><option value="retorno">Retorno</option></select></div>
+              </div>
+            </>
+          )}
+          {a.numero_whatsapp && !edit && (
+            <div style={{display:'flex',flexDirection:'column',gap:8,marginTop:16}}>
+              <button className="btn-ghost" style={{width:'100%',display:'flex',alignItems:'center',justifyContent:'center',gap:8}} onClick={()=>abrirWhats(a.numero_whatsapp)}>{Ic.whats}Abrir conversa no WhatsApp</button>
+              <button className="btn-ghost" style={{width:'100%',color:parado?'var(--pine)':'var(--rose)',borderColor:parado?'rgba(31,93,76,.3)':'rgba(168,74,91,.3)'}} onClick={()=>onAlternarBot(a.numero_whatsapp, !parado)}>{parado?'Reativar o bot nesta conversa':'Pausar o bot (assumir conversa)'}</button>
+            </div>
+          )}
+        </div>
+        <div className="modal-foot">
+          {edit
+            ? <><button className="btn-ghost" onClick={()=>setEdit(false)}>Voltar</button><button className="btn-primary" onClick={salvar}>Salvar</button></>
+            : <><button className="btn-ghost" onClick={onClose}>Fechar</button><button className="btn-primary" onClick={()=>setEdit(true)}>Editar</button></>}
+        </div>
       </div>
     </div>
   );
