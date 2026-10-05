@@ -378,9 +378,23 @@ function App() {
 
   function sair(){ localStorage.removeItem('orto_user'); setUser(null); }
 
-  async function moverPipeline(id, novoStatus){
+  async function moverPipeline(id, novoStatus, viaAgendamento){
+    const card = atend.find(a => a.id === id);
+    const idxDestino = COLS.findIndex(c => c.key === novoStatus);
+    const idxAgendado = COLS.findIndex(c => c.key === 'agendado');
+    // Regra 1: mover manualmente pra Agendado ou alem exige medico.
+    // viaAgendamento = veio do fluxo de agendar (ja tem medico), nao bloqueia.
+    if (!viaAgendamento && idxDestino >= idxAgendado && card && !card.medico_id) {
+      showToast('Defina o médico antes de mover para Agendado');
+      return false;
+    }
     setAtend(prev => prev.map(a => a.id===id ? {...a, status_pipeline: novoStatus} : a));
     await sb.from('atendimentos').update({ status_pipeline: novoStatus }).eq('id', id);
+    // Regra 2: ao entrar em Agendado, cadastra o paciente automaticamente.
+    if (novoStatus === 'agendado' && card) {
+      await upsertPaciente({ nome: card.nome_paciente, numero_whatsapp: card.numero_whatsapp, convenio: card.convenio, tipo_paciente: card.tipo_paciente });
+    }
+    return true;
   }
 
   async function salvarAtendimento(id, dados){
@@ -448,8 +462,8 @@ function App() {
     const { error, data } = await sb.from('agendamentos').insert({ ...dados, atendimento_id: atendimentoId }).select();
     if (error) { showToast('Erro ao agendar'); return; }
     if (data) setAgend(prev => [...prev, ...data]);
-    if (dados.atendimento_id) await moverPipeline(dados.atendimento_id, 'agendado');
-    // Cadastra o paciente automaticamente
+    if (dados.atendimento_id) await moverPipeline(dados.atendimento_id, 'agendado', true);
+    // Cadastra o paciente automaticamente (idempotente por telefone)
     await upsertPaciente({ nome: dados.nome_paciente, numero_whatsapp: dados.numero_whatsapp, convenio: dados.convenio });
     setModal(null);
     showToast('Consulta agendada');
