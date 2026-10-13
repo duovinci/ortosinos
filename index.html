@@ -293,6 +293,13 @@ const sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 const USUARIOS = [
   { email: "recepcao@ortosinos.com.br", senha: "ortosinos123", nome: "Recepção" },
   { email: "enzo@duovinci.com.br", senha: "duovinci", nome: "Enzo" },
+  // Médicos: visão restrita (só a própria agenda e pacientes). Senhas temporárias — trocar.
+  { email: "jose.pantoja@ortosinos.com.br", senha: "pantoja2026", nome: "Dr. Pantoja", medico_id: 1 },
+  { email: "guilherme.ricci@ortosinos.com.br", senha: "ricci2026", nome: "Dr. Ricci", medico_id: 2 },
+  { email: "fernando.konarzewski@ortosinos.com.br", senha: "konarzewski2026", nome: "Dr. Konarzewski", medico_id: 3 },
+  { email: "giana.hexsel@ortosinos.com.br", senha: "hexsel2026", nome: "Dra. Giana", medico_id: 4 },
+  { email: "guilherme.lyra@ortosinos.com.br", senha: "lyra2026", nome: "Dr. Lyra", medico_id: 5 },
+  { email: "marina.rodrigues@ortosinos.com.br", senha: "marina2026", nome: "Dra. Marina", medico_id: 6 },
 ];
 // ==================================================================================
 
@@ -324,8 +331,9 @@ function Login({ onLogin }) {
   function entrar() {
     const u = USUARIOS.find(x => x.email.toLowerCase() === email.trim().toLowerCase() && x.senha === senha);
     if (!u) { setErr('E-mail ou senha incorretos.'); return; }
-    localStorage.setItem('orto_user', JSON.stringify({ email: u.email, nome: u.nome }));
-    onLogin({ email: u.email, nome: u.nome });
+    const dados = { email: u.email, nome: u.nome, medico_id: u.medico_id || null };
+    localStorage.setItem('orto_user', JSON.stringify(dados));
+    onLogin(dados);
   }
   return (
     <div className="login-wrap">
@@ -377,6 +385,30 @@ function abrirWhats(n, e){
   if (w) { try { w.focus(); } catch (_) {} }
 }
 
+// Garante que todo atendimento fora de "aguardando" tenha cadastro em pacientes.
+// Roda no carregamento: insere os que faltam (backfill) de forma idempotente.
+async function sincronizarPacientes(atendimentos, pacientesAtuais){
+  const norm = s => (s||'').trim().toLowerCase();
+  const telExistentes = new Set(pacientesAtuais.filter(p=>p.numero_whatsapp).map(p=>p.numero_whatsapp));
+  const nomeExistentes = new Set(pacientesAtuais.map(p=>norm(p.nome)));
+  const vistosTel = new Set(), vistosNome = new Set();
+  const novos = [];
+  for (const a of atendimentos) {
+    if (a.status_pipeline === 'aguardando' || !a.nome_paciente) continue;
+    const tel = a.numero_whatsapp || null;
+    const nomeN = norm(a.nome_paciente);
+    if ((tel && telExistentes.has(tel)) || nomeExistentes.has(nomeN)) continue;
+    if (tel && vistosTel.has(tel)) continue;
+    if (!tel && vistosNome.has(nomeN)) continue;
+    if (tel) vistosTel.add(tel); else vistosNome.add(nomeN);
+    novos.push({ nome: a.nome_paciente, numero_whatsapp: tel, convenio: a.convenio||null, tipo_paciente: a.tipo_paciente||null });
+  }
+  if (!novos.length) return pacientesAtuais;
+  const { data } = await sb.from('pacientes').insert(novos).select();
+  if (data && data.length) return [...pacientesAtuais, ...data].sort((x,y)=>x.nome.localeCompare(y.nome));
+  return pacientesAtuais;
+}
+
 // ---------- APP ----------
 function App() {
   const [user, setUser] = useState(() => { try { return JSON.parse(localStorage.getItem('orto_user')); } catch { return null; } });
@@ -405,8 +437,11 @@ function App() {
     if (m.data) setMedicos(m.data);
     if (a.data) setAtend(a.data);
     if (g.data) setAgend(g.data);
-    if (p.data) setPacientes(p.data);
     if (s.data) setSessoes(s.data);
+    // Backfill: todo atendimento fora de "aguardando" tem que estar em pacientes
+    let pacs = p.data || [];
+    if (a.data) pacs = await sincronizarPacientes(a.data, pacs);
+    setPacientes(pacs);
     setLoading(false);
   }, []);
 
@@ -414,6 +449,18 @@ function App() {
 
   const medById = useMemo(() => Object.fromEntries(medicos.map(m => [m.id, m])), [medicos]);
   const medColor = useCallback((id) => MED_CORES[(medicos.findIndex(m=>m.id===id)) % MED_CORES.length] || '#1f5d4c', [medicos]);
+
+  // Visão de médico: só enxerga a própria agenda e os pacientes dele.
+  const meuMedicoId = user?.medico_id || null;
+  const ehMedico = !!meuMedicoId;
+  const agendMed = useMemo(() => ehMedico ? agend.filter(a => a.medico_id === meuMedicoId) : agend, [agend, ehMedico, meuMedicoId]);
+  const pacientesMed = useMemo(() => {
+    if (!ehMedico) return pacientes;
+    const norm = s => (s||'').trim().toLowerCase();
+    const tels = new Set(), nomes = new Set();
+    [...atend, ...agend].forEach(r => { if (r.medico_id === meuMedicoId) { if (r.numero_whatsapp) tels.add(r.numero_whatsapp); if (r.nome_paciente) nomes.add(norm(r.nome_paciente)); } });
+    return pacientes.filter(p => (p.numero_whatsapp && tels.has(p.numero_whatsapp)) || nomes.has(norm(p.nome)));
+  }, [ehMedico, meuMedicoId, pacientes, atend, agend]);
 
   if (!user) return <Login onLogin={setUser} />;
 
@@ -431,8 +478,8 @@ function App() {
     }
     setAtend(prev => prev.map(a => a.id===id ? {...a, status_pipeline: novoStatus} : a));
     await sb.from('atendimentos').update({ status_pipeline: novoStatus }).eq('id', id);
-    // Regra 2: ao entrar em Agendado, cadastra o paciente automaticamente.
-    if (novoStatus === 'agendado' && card) {
+    // Regra 2: ao sair de "aguardando" (qualquer fase adiante), cadastra o paciente automaticamente.
+    if (novoStatus !== 'aguardando' && card) {
       await upsertPaciente({ nome: card.nome_paciente, numero_whatsapp: card.numero_whatsapp, convenio: card.convenio, tipo_paciente: card.tipo_paciente });
     }
     return true;
@@ -465,11 +512,10 @@ function App() {
 
   async function upsertPaciente({ nome, numero_whatsapp, convenio, tipo_paciente }){
     if (!nome) return;
-    // Se ja existe paciente com esse telefone, nao duplica
-    if (numero_whatsapp) {
-      const existe = pacientes.find(p => p.numero_whatsapp === numero_whatsapp);
-      if (existe) return;
-    }
+    // Nao duplica: ja existe por telefone ou por nome
+    const norm = s => (s||'').trim().toLowerCase();
+    const existe = pacientes.find(p => (numero_whatsapp && p.numero_whatsapp === numero_whatsapp) || norm(p.nome) === norm(nome));
+    if (existe) return;
     const novo = { nome, numero_whatsapp: numero_whatsapp || null, convenio: convenio || null, tipo_paciente: tipo_paciente || null };
     const { data } = await sb.from('pacientes').insert(novo).select();
     if (data && data[0]) setPacientes(prev => [...prev, data[0]].sort((a,b)=>a.nome.localeCompare(b.nome)));
@@ -533,16 +579,19 @@ function App() {
     setModal(null);
   }
 
+  // Médico não acessa o pipeline geral; se cair nele, manda pra agenda.
+  const viewAtual = (ehMedico && view === 'pipeline') ? 'calendario' : view;
+
   return (
     <div className="shell">
       <aside className="side">
         <div className="brand">
           <div className="brand-mark"><img src="data:image/png;base64,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" alt="Ortosinos" style={{width:'100%',height:'100%',objectFit:'contain'}} /></div>
-          <div className="brand-name serif">Ortosinos<small>Atendimento</small></div>
+          <div className="brand-name serif">Ortosinos<small>{ehMedico?'Área do médico':'Atendimento'}</small></div>
         </div>
-        <button className={'nav-item'+(view==='pipeline'?' active':'')} onClick={()=>setView('pipeline')}>{Ic.pipe}<span>Atendimentos</span></button>
-        <button className={'nav-item'+(view==='calendario'?' active':'')} onClick={()=>setView('calendario')}>{Ic.cal}<span>Calendário</span></button>
-        <button className={'nav-item'+(view==='pacientes'?' active':'')} onClick={()=>setView('pacientes')}>{Ic.users}<span>Pacientes</span></button>
+        {!ehMedico && <button className={'nav-item'+(viewAtual==='pipeline'?' active':'')} onClick={()=>setView('pipeline')}>{Ic.pipe}<span>Atendimentos</span></button>}
+        <button className={'nav-item'+(viewAtual==='calendario'?' active':'')} onClick={()=>setView('calendario')}>{Ic.cal}<span>{ehMedico?'Minha agenda':'Calendário'}</span></button>
+        <button className={'nav-item'+(viewAtual==='pacientes'?' active':'')} onClick={()=>setView('pacientes')}>{Ic.users}<span>{ehMedico?'Meus pacientes':'Pacientes'}</span></button>
         <div className="side-foot">
           <div className="user-chip"><div className="user-av">{iniciais(user.nome)}</div><span className="uc-txt">{user.nome}</span></div>
           <button className="logout-btn" onClick={sair}><span>Sair</span></button>
@@ -550,13 +599,14 @@ function App() {
       </aside>
       <main className="main">
         {loading ? <div className="loading"><div className="spin"></div>Carregando...</div> : (
-          view==='pipeline' ? <Pipeline atend={atend} medById={medById} medicos={medicos} medColor={medColor} onMove={moverPipeline} onAgendar={(a)=>setModal({type:'agendar', atend:a})} onDetalhes={(a)=>setModal({type:'detalhes', atend:a})} statusPorNumero={statusPorNumero} onAlternarBot={alternarBot} /> :
-          view==='calendario' ? <Calendario agend={agend} medicos={medicos} medById={medById} medColor={medColor} onNovo={(dt)=>setModal({type:'agendar', data:dt})} onEditar={(ev)=>setModal({type:'agendar', evento:ev})} /> :
-          <Pacientes pacientes={pacientes} atend={atend} onNovo={()=>setModal({type:'paciente'})} onEdit={(p)=>setModal({type:'paciente', paciente:p})} />
+          viewAtual==='pipeline' ? <Pipeline atend={atend} medById={medById} medicos={medicos} medColor={medColor} onMove={moverPipeline} onAgendar={(a)=>setModal({type:'agendar', atend:a})} onDetalhes={(a)=>setModal({type:'detalhes', atend:a})} statusPorNumero={statusPorNumero} onAlternarBot={alternarBot} /> :
+          viewAtual==='calendario' ? <Calendario agend={ehMedico?agendMed:agend} medicos={medicos} medById={medById} medColor={medColor} soLeitura={ehMedico} onNovo={(dt)=>{ if(!ehMedico) setModal({type:'agendar', data:dt}); }} onEditar={(ev)=> ehMedico ? setModal({type:'consulta', evento:ev}) : setModal({type:'agendar', evento:ev})} /> :
+          <Pacientes pacientes={ehMedico?pacientesMed:pacientes} atend={ehMedico?agendMed:atend} readOnly={ehMedico} onNovo={()=>setModal({type:'paciente'})} onEdit={(p)=>setModal({type:'paciente', paciente:p})} />
         )}
       </main>
       {modal?.type==='agendar' && <ModalAgendar medicos={medicos} agend={agend} user={user} base={modal} onClose={()=>setModal(null)} onSave={salvarAgendamento} onCancelar={cancelarAgendamento} />}
-      {modal?.type==='paciente' && <ModalPaciente base={modal} agend={agend} medById={medById} onClose={()=>setModal(null)} onSave={salvarPaciente} />}
+      {modal?.type==='paciente' && <ModalPaciente base={modal} agend={agend} medById={medById} readOnly={ehMedico} onClose={()=>setModal(null)} onSave={salvarPaciente} />}
+      {modal?.type==='consulta' && <ModalConsulta ev={modal.evento} medById={medById} onClose={()=>setModal(null)} />}
       {modal?.type==='detalhes' && <ModalDetalhes a={modal.atend} medicos={medicos} medById={medById} statusBot={statusPorNumero[modal.atend.numero_whatsapp]} onAlternarBot={alternarBot} onClose={()=>setModal(null)} onSalvar={salvarAtendimento} onAgendar={(a)=>setModal({type:'agendar', atend:a})} />}
       {toast && <div className="toast">{toast}</div>}
     </div>
@@ -660,7 +710,7 @@ function LeadCard({ a, med, medColor, onAgendar, onDragStart, onDragEnd, draggin
 }
 
 // ---------- PACIENTES ----------
-function Pacientes({ pacientes, atend, onNovo, onEdit }) {
+function Pacientes({ pacientes, atend, onNovo, onEdit, readOnly }) {
   const [q, setQ] = useState('');
   const visitasPorTel = useMemo(() => {
     const m = {}; atend.forEach(a => { if(a.numero_whatsapp) m[a.numero_whatsapp]=(m[a.numero_whatsapp]||0)+1; }); return m;
@@ -673,16 +723,16 @@ function Pacientes({ pacientes, atend, onNovo, onEdit }) {
 
   return (
     <>
-      <div className="topbar"><h2 className="serif">Pacientes</h2><p className="crumb">{pacientes.length} pacientes cadastrados</p></div>
+      <div className="topbar"><h2 className="serif">{readOnly?'Meus pacientes':'Pacientes'}</h2><p className="crumb">{readOnly?'Pacientes com consulta na sua agenda':pacientes.length+' pacientes cadastrados'}</p></div>
       <div className="content">
         <div className="pipe-tools">
           <div className="search"><span className="si">{Ic.search}</span><input placeholder="Buscar por nome ou telefone" value={q} onChange={e=>setQ(e.target.value)} /></div>
-          <button className="btn-primary" style={{width:'auto',padding:'9px 16px',display:'flex',alignItems:'center',gap:7,marginLeft:'auto'}} onClick={onNovo}>{Ic.plus}Novo paciente</button>
+          {!readOnly && <button className="btn-primary" style={{width:'auto',padding:'9px 16px',display:'flex',alignItems:'center',gap:7,marginLeft:'auto'}} onClick={onNovo}>{Ic.plus}Novo paciente</button>}
         </div>
-        {lista.length===0 ? <div className="empty"><span className="serif">Nenhum paciente encontrado</span>{q?'Tente outra busca.':'Cadastre o primeiro paciente ou aguarde a triagem no WhatsApp.'}</div> : (
+        {lista.length===0 ? <div className="empty"><span className="serif">Nenhum paciente encontrado</span>{q?'Tente outra busca.':readOnly?'Você ainda não tem pacientes com consulta registrada.':'Cadastre o primeiro paciente ou aguarde a triagem no WhatsApp.'}</div> : (
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Paciente</th><th>Telefone</th><th>Tipo</th><th>Convênio</th><th>Contatos</th><th></th></tr></thead>
+              <thead><tr><th>Paciente</th><th>Telefone</th><th>Tipo</th><th>Convênio</th><th>{readOnly?'Consultas':'Contatos'}</th><th></th></tr></thead>
               <tbody>
                 {lista.map(p => (
                   <tr key={p.id} onClick={()=>onEdit(p)} style={{cursor:'pointer'}}>
@@ -690,8 +740,8 @@ function Pacientes({ pacientes, atend, onNovo, onEdit }) {
                     <td data-lbl="Telefone">{p.numero_whatsapp||'—'}</td>
                     <td data-lbl="Tipo">{p.tipo_paciente==='retorno'?'Retorno':p.tipo_paciente==='novo'?'1ª vez':'—'}</td>
                     <td data-lbl="Convênio">{p.convenio==='particular'?'Particular':p.convenio?'Convênio':'—'}</td>
-                    <td data-lbl="Contatos">{visitasPorTel[p.numero_whatsapp]||0}</td>
-                    <td style={{color:'var(--ink-faint)',fontSize:12}}>Editar</td>
+                    <td data-lbl={readOnly?'Consultas':'Contatos'}>{visitasPorTel[p.numero_whatsapp]||0}</td>
+                    <td style={{color:'var(--ink-faint)',fontSize:12}}>{readOnly?'Ver':'Editar'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -703,7 +753,7 @@ function Pacientes({ pacientes, atend, onNovo, onEdit }) {
   );
 }
 
-function ModalPaciente({ base, agend, medById, onClose, onSave }) {
+function ModalPaciente({ base, agend, medById, onClose, onSave, readOnly }) {
   const ed = base.paciente;
   const [nome, setNome] = useState(ed?.nome || '');
   const [tel, setTel] = useState(ed?.numero_whatsapp || '');
@@ -752,16 +802,16 @@ function ModalPaciente({ base, agend, medById, onClose, onSave }) {
   return (
     <div className="modal-bg" onClick={onClose}>
       <div className="modal" onClick={e=>e.stopPropagation()}>
-        <div className="modal-head"><h3 className="serif">{ed?'Editar paciente':'Novo paciente'}</h3><p>{ed?'Atualize os dados do cadastro':'Cadastre um paciente manualmente'}</p></div>
+        <div className="modal-head"><h3 className="serif">{readOnly?'Paciente':(ed?'Editar paciente':'Novo paciente')}</h3><p>{readOnly?'Dados e histórico do paciente':(ed?'Atualize os dados do cadastro':'Cadastre um paciente manualmente')}</p></div>
         <div className="modal-body">
-          <div className="field"><label>Nome completo</label><input value={nome} onChange={e=>setNome(e.target.value)} placeholder="Nome do paciente" /></div>
-          <div className="field"><label>Telefone</label><input value={tel} onChange={e=>setTel(e.target.value)} placeholder="Opcional" /></div>
+          <div className="field"><label>Nome completo</label><input value={nome} onChange={e=>setNome(e.target.value)} placeholder="Nome do paciente" disabled={readOnly} /></div>
+          <div className="field"><label>Telefone</label><input value={tel} onChange={e=>setTel(e.target.value)} placeholder="Opcional" disabled={readOnly} /></div>
           <div className="row2">
-            <div className="field"><label>Tipo</label><select value={tipo} onChange={e=>setTipo(e.target.value)}><option value="novo">1ª vez</option><option value="retorno">Retorno</option></select></div>
-            <div className="field"><label>Convênio</label><select value={conv} onChange={e=>setConv(e.target.value)}><option value="convenio">Convênio</option><option value="particular">Particular</option></select></div>
+            <div className="field"><label>Tipo</label><select value={tipo} onChange={e=>setTipo(e.target.value)} disabled={readOnly}><option value="novo">1ª vez</option><option value="retorno">Retorno</option></select></div>
+            <div className="field"><label>Convênio</label><select value={conv} onChange={e=>setConv(e.target.value)} disabled={readOnly}><option value="convenio">Convênio</option><option value="particular">Particular</option></select></div>
           </div>
-          <div className="field"><label>Data de nascimento</label><input type="date" value={nasc} onChange={e=>setNasc(e.target.value)} /></div>
-          <div className="field"><label>Observação</label><textarea value={obs} onChange={e=>setObs(e.target.value)} placeholder="Opcional" /></div>
+          <div className="field"><label>Data de nascimento</label><input type="date" value={nasc} onChange={e=>setNasc(e.target.value)} disabled={readOnly} /></div>
+          <div className="field"><label>Observação</label><textarea value={obs} onChange={e=>setObs(e.target.value)} placeholder="Opcional" disabled={readOnly} /></div>
 
           {ed && (
             <div className="hist-block">
@@ -780,7 +830,39 @@ function ModalPaciente({ base, agend, medById, onClose, onSave }) {
             </div>
           )}
         </div>
-        <div className="modal-foot"><button className="btn-ghost" onClick={onClose}>Cancelar</button><button className="btn-primary" onClick={salvar}>{ed?'Salvar alterações':'Cadastrar'}</button></div>
+        <div className="modal-foot">
+          {readOnly
+            ? <button className="btn-primary" onClick={onClose}>Fechar</button>
+            : <><button className="btn-ghost" onClick={onClose}>Cancelar</button><button className="btn-primary" onClick={salvar}>{ed?'Salvar alterações':'Cadastrar'}</button></>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- MODAL CONSULTA (visão do médico, só leitura) ----------
+function ModalConsulta({ ev, medById, onClose }) {
+  const med = medById[ev.medico_id];
+  const dataTxt = new Date(ev.inicio).toLocaleDateString('pt-BR',{weekday:'long',day:'2-digit',month:'long',year:'numeric'});
+  const assunto = ASSUNTOS[ev.assunto] || ASSUNTOS.outro;
+  return (
+    <div className="modal-bg" onClick={onClose}>
+      <div className="modal" onClick={e=>e.stopPropagation()}>
+        <div className="modal-head"><h3 className="serif">Consulta</h3><p style={{textTransform:'capitalize'}}>{dataTxt}</p></div>
+        <div className="modal-body">
+          <div style={{display:'flex',flexDirection:'column',gap:11}}>
+            <div><div style={{fontSize:12,color:'var(--ink-faint)'}}>Paciente</div><div style={{fontSize:15,fontWeight:600}}>{ev.nome_paciente||'Sem nome'}</div></div>
+            <div style={{display:'flex',gap:20}}>
+              <div><div style={{fontSize:12,color:'var(--ink-faint)'}}>Horário</div><div style={{fontSize:14}}>{fmtHora(ev.inicio)}{ev.fim?' – '+fmtHora(ev.fim):''}</div></div>
+              <div><div style={{fontSize:12,color:'var(--ink-faint)'}}>Assunto</div><div style={{fontSize:14}}>{assunto.label}</div></div>
+              <div><div style={{fontSize:12,color:'var(--ink-faint)'}}>Pagamento</div><div style={{fontSize:14}}>{ev.convenio==='particular'?'Particular':'Convênio'}</div></div>
+            </div>
+            <div><div style={{fontSize:12,color:'var(--ink-faint)'}}>Médico</div><div style={{fontSize:14}}>{med?med.nome:'—'}</div></div>
+            <div><div style={{fontSize:12,color:'var(--ink-faint)'}}>Telefone</div><div style={{fontSize:14}}>{ev.numero_whatsapp||'—'}</div></div>
+            {ev.observacao && <div><div style={{fontSize:12,color:'var(--ink-faint)'}}>Observação</div><div style={{fontSize:14}}>{ev.observacao}</div></div>}
+          </div>
+        </div>
+        <div className="modal-foot"><button className="btn-primary" onClick={onClose}>Fechar</button></div>
       </div>
     </div>
   );
@@ -797,7 +879,7 @@ const DIAS = ['Dom','Seg','Ter','Qua','Qui','Sex','Sáb'];
 const MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','agosto','setembro','outubro','novembro','dezembro'];
 const HORAS = Array.from({length:12},(_,i)=>i+7); // 7h as 18h
 
-function Calendario({ agend, medicos, medById, medColor, onNovo, onEditar }) {
+function Calendario({ agend, medicos, medById, medColor, onNovo, onEditar, soLeitura }) {
   const [modo, setModo] = useState('semana');
   const [refDate, setRefDate] = useState(new Date());
   const [fMed, setFMed] = useState('');
@@ -821,7 +903,7 @@ function Calendario({ agend, medicos, medById, medColor, onNovo, onEditar }) {
 
   return (
     <>
-      <div className="topbar"><h2 className="serif">Calendário</h2><p className="crumb">Agenda de consultas por médico</p></div>
+      <div className="topbar"><h2 className="serif">{soLeitura?'Minha agenda':'Calendário'}</h2><p className="crumb">{soLeitura?'Suas consultas marcadas':'Agenda de consultas por médico'}</p></div>
       <div className="content">
         <div className="cal-tools">
           <div className="seg">
@@ -834,13 +916,13 @@ function Calendario({ agend, medicos, medById, medColor, onNovo, onEditar }) {
             <div className="cal-label serif">{label()}</div>
             <button onClick={()=>nav(1)}>{Ic.chevR}</button>
           </div>
-          <div className="selectbox" style={{marginLeft:'auto'}}>
+          {!soLeitura && <div className="selectbox" style={{marginLeft:'auto'}}>
             <select value={fMed} onChange={e=>setFMed(e.target.value)}>
               <option value="">Todos os médicos</option>
               {medicos.map(m => <option key={m.id} value={m.id}>{primeiroUltimo(m.nome)}</option>)}
             </select>
-          </div>
-          <button className="btn-primary" style={{width:'auto',padding:'9px 16px',display:'flex',alignItems:'center',gap:7}} onClick={()=>onNovo(new Date(refDate.getFullYear(),refDate.getMonth(),refDate.getDate(),9,0))}>{Ic.plus}Nova consulta</button>
+          </div>}
+          {!soLeitura && <button className="btn-primary" style={{width:'auto',padding:'9px 16px',display:'flex',alignItems:'center',gap:7}} onClick={()=>onNovo(new Date(refDate.getFullYear(),refDate.getMonth(),refDate.getDate(),9,0))}>{Ic.plus}Nova consulta</button>}
         </div>
         {modo==='mes' && <MesView refDate={refDate} evs={evs} medColor={medColor} ehHoje={ehHoje} onNovo={onNovo} onEditar={onEditar} />}
         {modo==='semana' && <SemanaView refDate={refDate} evs={evs} medColor={medColor} ehHoje={ehHoje} onNovo={onNovo} onEditar={onEditar} />}
