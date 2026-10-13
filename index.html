@@ -282,7 +282,7 @@
 <body>
 <div id="root"></div>
 <script type="text/babel" data-presets="react">
-const { useState, useEffect, useMemo, useCallback } = React;
+const { useState, useEffect, useMemo, useCallback, useRef } = React;
 
 // ---- CONFIG ----
 const SUPABASE_URL = "https://vmiptszijvmefnnmrfgy.supabase.co";
@@ -422,8 +422,8 @@ function App({ user, onLogout }) {
 
   const showToast = useCallback((m) => { setToast(m); setTimeout(()=>setToast(''), 2200); }, []);
 
-  const carregar = useCallback(async () => {
-    setLoading(true);
+  const carregar = useCallback(async (silencioso) => {
+    if (!silencioso) setLoading(true);
     const [m, a, g, p, s] = await Promise.all([
       sb.from('medicos').select('*').eq('ativo', true).order('id'),
       sb.from('atendimentos').select('*').order('criado_em', { ascending: true }),
@@ -443,6 +443,17 @@ function App({ user, onLogout }) {
   }, []);
 
   useEffect(() => { if (user) carregar(); }, [user, carregar]);
+
+  // Atualiza sozinho em segundo plano: a cada 15s e ao voltar pra aba.
+  // Silencioso (sem spinner) e pausa quando há um modal aberto, pra não atrapalhar.
+  const modalRef = useRef(null);
+  useEffect(() => { modalRef.current = modal; }, [modal]);
+  useEffect(() => {
+    const tick = () => { if (!document.hidden && !modalRef.current) carregar(true); };
+    const id = setInterval(tick, 15000);
+    window.addEventListener('focus', tick);
+    return () => { clearInterval(id); window.removeEventListener('focus', tick); };
+  }, [carregar]);
 
   const medById = useMemo(() => Object.fromEntries(medicos.map(m => [m.id, m])), [medicos]);
   const medColor = useCallback((id) => MED_CORES[(medicos.findIndex(m=>m.id===id)) % MED_CORES.length] || '#1f5d4c', [medicos]);
