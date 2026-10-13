@@ -109,6 +109,7 @@
   .lead-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
   .chip { font-size: 11.5px; padding: 2px 8px; border-radius: 6px; background: var(--line-soft); color: var(--ink-soft); font-weight: 500; }
   .chip.ret { background: rgba(31,93,76,.1); color: var(--pine); }
+  .chip.pos { background: rgba(194,112,61,.16); color: #a85a28; }
   .lead-time { font-size: 11.5px; color: var(--ink-faint); margin-left: auto; }
   .lead-actions { display: flex; gap: 6px; margin-top: 11px; }
   .mini-btn { flex: 1; font-size: 12px; font-weight: 500; padding: 7px; border-radius: 8px; background: var(--line-soft); color: var(--ink-soft); transition: background .13s, color .13s; }
@@ -711,7 +712,7 @@ function LeadCard({ a, med, medColor, onAgendar, onDragStart, onDragEnd, draggin
         <span className="assunto-tag" style={{background:ass.bg,color:ass.fg}}>{ass.label}</span>
       </div>
       <div className="lead-meta">
-        <span className={'chip'+(a.tipo_paciente==='retorno'?' ret':'')}>{a.tipo_paciente==='retorno'?'Retorno':'1ª vez'}</span>
+        <span className={'chip'+(a.tipo_paciente==='retorno'?' ret':a.tipo_paciente==='pos_operatorio'?' pos':'')}>{a.tipo_paciente==='retorno'?'Retorno':a.tipo_paciente==='pos_operatorio'?'Pós-op':'1ª vez'}</span>
         <span className="chip">{a.convenio==='particular'?'Particular':'Convênio'}</span>
         {parado && <span className="card-status humano">Bot pausado</span>}
         <span className="lead-time">{tempoRel(a.criado_em)}</span>
@@ -779,7 +780,7 @@ function Pacientes({ pacientes, atend, agend, medicos, onNovo, onEdit, readOnly 
                   <tr key={p.id} onClick={()=>onEdit(p)} style={{cursor:'pointer'}}>
                     <td><span className="pac-av">{iniciais(p.nome)}</span><span className="pac-name">{p.nome}</span></td>
                     <td data-lbl="Telefone">{p.numero_whatsapp||'—'}</td>
-                    <td data-lbl="Tipo">{p.tipo_paciente==='retorno'?'Retorno':p.tipo_paciente==='novo'?'1ª vez':'—'}</td>
+                    <td data-lbl="Tipo">{p.tipo_paciente==='retorno'?'Retorno':p.tipo_paciente==='pos_operatorio'?'Pós-operatório':p.tipo_paciente==='novo'?'1ª vez':'—'}</td>
                     <td data-lbl="Convênio">{p.convenio==='particular'?'Particular':p.convenio?'Convênio':'—'}</td>
                     <td data-lbl={readOnly?'Consultas':'Contatos'}>{visitasPorTel[p.numero_whatsapp]||0}</td>
                     <td style={{color:'var(--ink-faint)',fontSize:12}}>{readOnly?'Ver':'Editar'}</td>
@@ -848,7 +849,7 @@ function ModalPaciente({ base, agend, medById, onClose, onSave, readOnly }) {
           <div className="field"><label>Nome completo</label><input value={nome} onChange={e=>setNome(e.target.value)} placeholder="Nome do paciente" disabled={readOnly} /></div>
           <div className="field"><label>Telefone</label><input value={tel} onChange={e=>setTel(e.target.value)} placeholder="Opcional" disabled={readOnly} /></div>
           <div className="row2">
-            <div className="field"><label>Tipo</label><select value={tipo} onChange={e=>setTipo(e.target.value)} disabled={readOnly}><option value="novo">1ª vez</option><option value="retorno">Retorno</option></select></div>
+            <div className="field"><label>Tipo</label><select value={tipo} onChange={e=>setTipo(e.target.value)} disabled={readOnly}><option value="novo">1ª vez</option><option value="retorno">Retorno</option><option value="pos_operatorio">Pós-operatório</option></select></div>
             <div className="field"><label>Convênio</label><select value={conv} onChange={e=>setConv(e.target.value)} disabled={readOnly}><option value="convenio">Convênio</option><option value="particular">Particular</option></select></div>
           </div>
           <div className="field"><label>Data de nascimento</label><input type="date" value={nasc} onChange={e=>setNasc(e.target.value)} disabled={readOnly} /></div>
@@ -1075,7 +1076,7 @@ function ModalDetalhes({ a, medicos, medById, statusBot, onAlternarBot, onClose,
               <div><div style={{fontSize:12,color:'var(--ink-faint)'}}>Médico</div><div style={{fontSize:14}}>{med?med.nome:'Não definido'}</div></div>
               <div style={{display:'flex',gap:20}}>
                 <div><div style={{fontSize:12,color:'var(--ink-faint)'}}>Assunto</div><div style={{fontSize:14}}>{ass.label}</div></div>
-                <div><div style={{fontSize:12,color:'var(--ink-faint)'}}>Tipo</div><div style={{fontSize:14}}>{a.tipo_paciente==='retorno'?'Retorno':'1ª vez'}</div></div>
+                <div><div style={{fontSize:12,color:'var(--ink-faint)'}}>Tipo</div><div style={{fontSize:14}}>{a.tipo_paciente==='retorno'?'Retorno':a.tipo_paciente==='pos_operatorio'?'Pós-operatório':'1ª vez'}</div></div>
                 <div><div style={{fontSize:12,color:'var(--ink-faint)'}}>Pagamento</div><div style={{fontSize:14}}>{a.convenio==='particular'?'Particular':'Convênio'}</div></div>
               </div>
               <div><div style={{fontSize:12,color:'var(--ink-faint)'}}>Telefone</div><div style={{fontSize:14}}>{a.numero_whatsapp||'—'}</div></div>
@@ -1087,7 +1088,7 @@ function ModalDetalhes({ a, medicos, medById, statusBot, onAlternarBot, onClose,
               <div className="field"><label>Telefone</label><input value={tel} onChange={e=>setTel(e.target.value)} placeholder="Ex: 5551999999999" /></div>
               <div className="row2">
                 <div className="field"><label>Assunto</label><select value={assunto} onChange={e=>setAssunto(e.target.value)}>{Object.entries(ASSUNTOS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select></div>
-                <div className="field"><label>Tipo</label><select value={tipo} onChange={e=>setTipo(e.target.value)}><option value="novo">1ª vez</option><option value="retorno">Retorno</option></select></div>
+                <div className="field"><label>Tipo</label><select value={tipo} onChange={e=>setTipo(e.target.value)}><option value="novo">1ª vez</option><option value="retorno">Retorno</option><option value="pos_operatorio">Pós-operatório</option></select></div>
               </div>
             </>
           )}
