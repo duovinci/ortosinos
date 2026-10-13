@@ -410,8 +410,7 @@ async function sincronizarPacientes(atendimentos, pacientesAtuais){
 }
 
 // ---------- APP ----------
-function App() {
-  const [user, setUser] = useState(() => { try { return JSON.parse(localStorage.getItem('orto_user')); } catch { return null; } });
+function App({ user, onLogout }) {
   const [view, setViewRaw] = useState(() => localStorage.getItem('orto_view') || 'pipeline');
   const setView = useCallback((v) => { localStorage.setItem('orto_view', v); setViewRaw(v); }, []);
   const [medicos, setMedicos] = useState([]);
@@ -462,9 +461,7 @@ function App() {
     return pacientes.filter(p => (p.numero_whatsapp && tels.has(p.numero_whatsapp)) || nomes.has(norm(p.nome)));
   }, [ehMedico, meuMedicoId, pacientes, atend, agend]);
 
-  if (!user) return <Login onLogin={setUser} />;
-
-  function sair(){ localStorage.removeItem('orto_user'); setUser(null); }
+  function sair(){ onLogout(); }
 
   async function moverPipeline(id, novoStatus, viaAgendamento){
     const card = atend.find(a => a.id === id);
@@ -1172,7 +1169,15 @@ function ModalAgendar({ medicos, agend, user, base, onClose, onSave, onCancelar 
 function toDateInput(d){ return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); }
 function toTimeInput(d){ return String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0'); }
 
-ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+// Raiz: cuida só do login. Monta o App do zero a cada entrada (key),
+// evitando tela branca / estado preso ao trocar de usuário.
+function Root(){
+  const [user, setUser] = useState(() => { try { return JSON.parse(localStorage.getItem('orto_user')); } catch { return null; } });
+  function logout(){ try { localStorage.removeItem('orto_user'); } catch(_) {} setUser(null); }
+  if (!user) return <Login onLogin={setUser} />;
+  return <App key={user.email} user={user} onLogout={logout} />;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Root />);
 </script>
 </body>
 </html>
