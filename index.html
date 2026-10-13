@@ -389,18 +389,16 @@ function abrirWhats(n, e){
 // Roda no carregamento: insere os que faltam (backfill) de forma idempotente.
 async function sincronizarPacientes(atendimentos, pacientesAtuais){
   const norm = s => (s||'').trim().toLowerCase();
-  const telExistentes = new Set(pacientesAtuais.filter(p=>p.numero_whatsapp).map(p=>p.numero_whatsapp));
-  const nomeExistentes = new Set(pacientesAtuais.map(p=>norm(p.nome)));
-  const vistosTel = new Set(), vistosNome = new Set();
+  const chave = (nome, tel) => norm(nome)+'|'+(tel||'');
+  const existentes = new Set(pacientesAtuais.map(p => chave(p.nome, p.numero_whatsapp)));
+  const vistos = new Set();
   const novos = [];
   for (const a of atendimentos) {
     if (a.status_pipeline === 'aguardando' || !a.nome_paciente) continue;
     const tel = a.numero_whatsapp || null;
-    const nomeN = norm(a.nome_paciente);
-    if ((tel && telExistentes.has(tel)) || nomeExistentes.has(nomeN)) continue;
-    if (tel && vistosTel.has(tel)) continue;
-    if (!tel && vistosNome.has(nomeN)) continue;
-    if (tel) vistosTel.add(tel); else vistosNome.add(nomeN);
+    const k = chave(a.nome_paciente, tel);
+    if (existentes.has(k) || vistos.has(k)) continue;
+    vistos.add(k);
     novos.push({ nome: a.nome_paciente, numero_whatsapp: tel, convenio: a.convenio||null, tipo_paciente: a.tipo_paciente||null });
   }
   if (!novos.length) return pacientesAtuais;
@@ -520,12 +518,15 @@ function App({ user, onLogout }) {
 
   async function upsertPaciente({ nome, numero_whatsapp, convenio, tipo_paciente }){
     if (!nome) return;
-    // Nao duplica: ja existe por telefone ou por nome
+    // Identidade = nome + telefone. Mesmo número com nome diferente = outro paciente
+    // (ex: familiares que usam o mesmo WhatsApp).
     const norm = s => (s||'').trim().toLowerCase();
-    const existe = pacientes.find(p => (numero_whatsapp && p.numero_whatsapp === numero_whatsapp) || norm(p.nome) === norm(nome));
+    const tel = numero_whatsapp || null;
+    const existe = pacientes.find(p => norm(p.nome) === norm(nome) && (p.numero_whatsapp||null) === tel);
     if (existe) return;
-    const novo = { nome, numero_whatsapp: numero_whatsapp || null, convenio: convenio || null, tipo_paciente: tipo_paciente || null };
-    const { data } = await sb.from('pacientes').insert(novo).select();
+    const novo = { nome, numero_whatsapp: tel, convenio: convenio || null, tipo_paciente: tipo_paciente || null };
+    const { data, error } = await sb.from('pacientes').insert(novo).select();
+    if (error) { showToast('Não consegui cadastrar o paciente'); return; }
     if (data && data[0]) setPacientes(prev => [...prev, data[0]].sort((a,b)=>a.nome.localeCompare(b.nome)));
   }
 
@@ -609,7 +610,7 @@ function App({ user, onLogout }) {
         {loading ? <div className="loading"><div className="spin"></div>Carregando...</div> : (
           viewAtual==='pipeline' ? <Pipeline atend={atend} medById={medById} medicos={medicos} medColor={medColor} onMove={moverPipeline} onAgendar={(a)=>setModal({type:'agendar', atend:a})} onDetalhes={(a)=>setModal({type:'detalhes', atend:a})} statusPorNumero={statusPorNumero} onAlternarBot={alternarBot} /> :
           viewAtual==='calendario' ? <Calendario agend={ehMedico?agendMed:agend} medicos={medicos} medById={medById} medColor={medColor} soLeitura={ehMedico} onNovo={(dt)=>{ if(!ehMedico) setModal({type:'agendar', data:dt}); }} onEditar={(ev)=> ehMedico ? setModal({type:'consulta', evento:ev}) : setModal({type:'agendar', evento:ev})} /> :
-          <Pacientes pacientes={ehMedico?pacientesMed:pacientes} atend={ehMedico?agendMed:atend} readOnly={ehMedico} onNovo={()=>setModal({type:'paciente'})} onEdit={(p)=>setModal({type:'paciente', paciente:p})} />
+          <Pacientes pacientes={ehMedico?pacientesMed:pacientes} atend={ehMedico?agendMed:atend} agend={agend} medicos={medicos} readOnly={ehMedico} onNovo={()=>setModal({type:'paciente'})} onEdit={(p)=>setModal({type:'paciente', paciente:p})} />
         )}
       </main>
       {modal?.type==='agendar' && <ModalAgendar medicos={medicos} agend={agend} user={user} base={modal} onClose={()=>setModal(null)} onSave={salvarAgendamento} onCancelar={cancelarAgendamento} />}
@@ -718,16 +719,36 @@ function LeadCard({ a, med, medColor, onAgendar, onDragStart, onDragEnd, draggin
 }
 
 // ---------- PACIENTES ----------
-function Pacientes({ pacientes, atend, onNovo, onEdit, readOnly }) {
+function Pacientes({ pacientes, atend, agend, medicos, onNovo, onEdit, readOnly }) {
   const [q, setQ] = useState('');
+  const [fMed, setFMed] = useState('');
+  const norm = s => (s||'').trim().toLowerCase();
   const visitasPorTel = useMemo(() => {
     const m = {}; atend.forEach(a => { if(a.numero_whatsapp) m[a.numero_whatsapp]=(m[a.numero_whatsapp]||0)+1; }); return m;
   }, [atend]);
+  // Médicos ligados a cada paciente (via atendimentos + agendamentos), por telefone e por nome
+  const medsPorChave = useMemo(() => {
+    const m = {};
+    [...(atend||[]), ...(agend||[])].forEach(r => {
+      if (!r.medico_id) return;
+      const ks = [];
+      if (r.numero_whatsapp) ks.push('t:'+r.numero_whatsapp);
+      if (r.nome_paciente) ks.push('n:'+norm(r.nome_paciente));
+      ks.forEach(k => { (m[k] = m[k] || new Set()).add(r.medico_id); });
+    });
+    return m;
+  }, [atend, agend]);
+  function temMedico(p, mid){
+    const st = medsPorChave['t:'+(p.numero_whatsapp||'')];
+    const sn = medsPorChave['n:'+norm(p.nome)];
+    return (st && st.has(mid)) || (sn && sn.has(mid));
+  }
   const lista = useMemo(() => {
     let arr = pacientes;
     if (q) arr = arr.filter(p => (p.nome||'').toLowerCase().includes(q.toLowerCase()) || (p.numero_whatsapp||'').includes(q));
+    if (fMed) arr = arr.filter(p => temMedico(p, +fMed));
     return arr;
-  }, [pacientes, q]);
+  }, [pacientes, q, fMed, medsPorChave]);
 
   return (
     <>
@@ -735,6 +756,7 @@ function Pacientes({ pacientes, atend, onNovo, onEdit, readOnly }) {
       <div className="content">
         <div className="pipe-tools">
           <div className="search"><span className="si">{Ic.search}</span><input placeholder="Buscar por nome ou telefone" value={q} onChange={e=>setQ(e.target.value)} /></div>
+          {!readOnly && <div className="selectbox"><select value={fMed} onChange={e=>setFMed(e.target.value)}><option value="">Todos os médicos</option>{(medicos||[]).map(m => <option key={m.id} value={m.id}>{primeiroUltimo(m.nome)}</option>)}</select></div>}
           {!readOnly && <button className="btn-primary" style={{width:'auto',padding:'9px 16px',display:'flex',alignItems:'center',gap:7,marginLeft:'auto'}} onClick={onNovo}>{Ic.plus}Novo paciente</button>}
         </div>
         {lista.length===0 ? <div className="empty"><span className="serif">Nenhum paciente encontrado</span>{q?'Tente outra busca.':readOnly?'Você ainda não tem pacientes com consulta registrada.':'Cadastre o primeiro paciente ou aguarde a triagem no WhatsApp.'}</div> : (
