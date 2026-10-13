@@ -196,6 +196,43 @@
 
   .lead-move { display: none; }
 
+  /* HISTORICO DE CONSULTAS (modal paciente) */
+  .hist-block { margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+  .hist-title { font-size: 12px; font-weight: 600; color: var(--ink-faint); text-transform: uppercase; letter-spacing: .04em; margin-bottom: 8px; }
+  .consulta-row { display: flex; align-items: center; gap: 11px; padding: 9px 11px; border-radius: 10px; background: #fbfaf6; border: 1px solid var(--line-soft); margin-bottom: 7px; }
+  .consulta-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+
+  /* ===== REFINAMENTO VISUAL ===== */
+  body { background:
+      radial-gradient(1200px 600px at 100% -5%, rgba(31,93,76,.05), transparent 60%),
+      radial-gradient(900px 500px at -5% 105%, rgba(194,112,61,.05), transparent 55%),
+      var(--paper); }
+  .side { background: linear-gradient(180deg, #ffffff 0%, #fdfcf9 100%); box-shadow: 1px 0 0 var(--line), 4px 0 24px rgba(20,32,28,.03); }
+  .nav-item { position: relative; }
+  .nav-item.active { box-shadow: 0 6px 16px rgba(31,93,76,.28); }
+  .nav-item.active::before { content: ''; position: absolute; left: -14px; top: 50%; transform: translateY(-50%); width: 3px; height: 20px; border-radius: 0 3px 3px 0; background: var(--clay); }
+  .topbar h2 { background: linear-gradient(90deg, var(--ink), #2a3a34); -webkit-background-clip: text; background-clip: text; }
+  .col-head { border-bottom: none; }
+  .col-dot { box-shadow: 0 0 0 3px rgba(0,0,0,.04); }
+  .lead { border-radius: 13px; }
+  .lead:hover { transform: translateY(-1px); }
+  .assunto-tag { letter-spacing: .01em; }
+  .wa-btn { background: rgba(37,145,98,.12) !important; color: #1f8a5a !important; }
+  .wa-btn:hover { background: #1f8a5a !important; color: #fff !important; }
+  .btn-primary { box-shadow: 0 4px 14px rgba(31,93,76,.22); }
+  .btn-primary:hover { box-shadow: 0 6px 18px rgba(31,93,76,.3); }
+  .login-wrap { background:
+      radial-gradient(1000px 520px at 80% -10%, rgba(31,93,76,.1), transparent 60%),
+      radial-gradient(800px 460px at 10% 110%, rgba(194,112,61,.08), transparent 55%); }
+  .login-card { box-shadow: 0 1px 2px rgba(20,32,28,.04), 0 20px 50px rgba(20,32,28,.1); }
+  .login-mark { box-shadow: 0 8px 20px rgba(31,93,76,.3); }
+  .table-wrap { border-radius: 16px; }
+  thead th:first-child { padding-left: 20px; }
+  tbody td:first-child { padding-left: 20px; }
+  .modal { border-radius: 20px; }
+  .seg button.on { font-weight: 600; }
+  .day-cell.today { box-shadow: inset 0 0 0 2px rgba(31,93,76,.18); }
+
   @media (max-width: 920px) {
     .board { grid-auto-flow: column; grid-template-columns: none; grid-auto-columns: 78%; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 8px; }
     .col { scroll-snap-align: start; }
@@ -333,7 +370,11 @@ function linkWhats(n){
 function abrirWhats(n, e){
   if (e) e.stopPropagation();
   const u = linkWhats(n);
-  if (u) window.open(u, 'whatsapp-orto');
+  if (!u) return;
+  // Reusa sempre a mesma aba nomeada: se o WhatsApp ja estiver aberto por aqui,
+  // navega nela em vez de abrir outra. focus() tenta trazer a aba pra frente.
+  const w = window.open(u, 'whatsapp-orto');
+  if (w) { try { w.focus(); } catch (_) {} }
 }
 
 // ---------- APP ----------
@@ -515,7 +556,7 @@ function App() {
         )}
       </main>
       {modal?.type==='agendar' && <ModalAgendar medicos={medicos} agend={agend} user={user} base={modal} onClose={()=>setModal(null)} onSave={salvarAgendamento} onCancelar={cancelarAgendamento} />}
-      {modal?.type==='paciente' && <ModalPaciente base={modal} onClose={()=>setModal(null)} onSave={salvarPaciente} />}
+      {modal?.type==='paciente' && <ModalPaciente base={modal} agend={agend} medById={medById} onClose={()=>setModal(null)} onSave={salvarPaciente} />}
       {modal?.type==='detalhes' && <ModalDetalhes a={modal.atend} medicos={medicos} medById={medById} statusBot={statusPorNumero[modal.atend.numero_whatsapp]} onAlternarBot={alternarBot} onClose={()=>setModal(null)} onSalvar={salvarAtendimento} onAgendar={(a)=>setModal({type:'agendar', atend:a})} />}
       {toast && <div className="toast">{toast}</div>}
     </div>
@@ -662,7 +703,7 @@ function Pacientes({ pacientes, atend, onNovo, onEdit }) {
   );
 }
 
-function ModalPaciente({ base, onClose, onSave }) {
+function ModalPaciente({ base, agend, medById, onClose, onSave }) {
   const ed = base.paciente;
   const [nome, setNome] = useState(ed?.nome || '');
   const [tel, setTel] = useState(ed?.numero_whatsapp || '');
@@ -670,10 +711,44 @@ function ModalPaciente({ base, onClose, onSave }) {
   const [tipo, setTipo] = useState(ed?.tipo_paciente || 'novo');
   const [nasc, setNasc] = useState(ed?.data_nascimento || '');
   const [obs, setObs] = useState(ed?.observacao || '');
+
+  // Historico de consultas do paciente: casa por telefone, senao por nome.
+  const consultas = useMemo(() => {
+    if (!ed) return { feitas: [], futuras: [] };
+    const telPac = (ed.numero_whatsapp||'').replace(/\D/g,'');
+    const nomePac = (ed.nome||'').trim().toLowerCase();
+    const minhas = (agend||[]).filter(a => {
+      if (a.status === 'cancelado') return false;
+      const telA = (a.numero_whatsapp||'').replace(/\D/g,'');
+      if (telPac && telA) return telA === telPac;
+      return nomePac && (a.nome_paciente||'').trim().toLowerCase() === nomePac;
+    });
+    const agora = Date.now();
+    const feitas = minhas.filter(a => new Date(a.inicio) <= agora).sort((x,y)=> new Date(y.inicio)-new Date(x.inicio));
+    const futuras = minhas.filter(a => new Date(a.inicio) > agora).sort((x,y)=> new Date(x.inicio)-new Date(y.inicio));
+    return { feitas, futuras };
+  }, [ed, agend]);
+
+  function fmtData(iso){ return new Date(iso).toLocaleDateString('pt-BR',{day:'2-digit',month:'short',year:'numeric'}); }
+  function nomeMed(id){ const m = (medById||{})[id]; return m ? primeiroUltimo(m.nome) : 'Médico não definido'; }
+
   function salvar(){
     if (!nome.trim()) return;
     onSave({ nome: nome.trim(), numero_whatsapp: tel||null, convenio: conv, tipo_paciente: tipo, data_nascimento: nasc||null, observacao: obs||null }, ed?.id);
   }
+
+  function LinhaConsulta({ c }){
+    return (
+      <div className="consulta-row">
+        <span className="consulta-dot" style={{background: medById && medById[c.medico_id] ? medColorStatic(c.medico_id, medById) : 'var(--ink-faint)'}}></span>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontSize:13,fontWeight:600}}>{nomeMed(c.medico_id)}</div>
+          <div style={{fontSize:12,color:'var(--ink-faint)'}}>{fmtData(c.inicio)} · {fmtHora(c.inicio)}</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="modal-bg" onClick={onClose}>
       <div className="modal" onClick={e=>e.stopPropagation()}>
@@ -687,11 +762,34 @@ function ModalPaciente({ base, onClose, onSave }) {
           </div>
           <div className="field"><label>Data de nascimento</label><input type="date" value={nasc} onChange={e=>setNasc(e.target.value)} /></div>
           <div className="field"><label>Observação</label><textarea value={obs} onChange={e=>setObs(e.target.value)} placeholder="Opcional" /></div>
+
+          {ed && (
+            <div className="hist-block">
+              {consultas.futuras.length > 0 && (
+                <div style={{marginBottom:14}}>
+                  <div className="hist-title">Próximas consultas</div>
+                  {consultas.futuras.map(c => <LinhaConsulta key={c.id} c={c} />)}
+                </div>
+              )}
+              <div>
+                <div className="hist-title">Consultas realizadas</div>
+                {consultas.feitas.length === 0
+                  ? <div style={{fontSize:12.5,color:'var(--ink-faint)',padding:'6px 0'}}>Nenhuma consulta registrada ainda.</div>
+                  : consultas.feitas.map(c => <LinhaConsulta key={c.id} c={c} />)}
+              </div>
+            </div>
+          )}
         </div>
         <div className="modal-foot"><button className="btn-ghost" onClick={onClose}>Cancelar</button><button className="btn-primary" onClick={salvar}>{ed?'Salvar alterações':'Cadastrar'}</button></div>
       </div>
     </div>
   );
+}
+// Cor do medico a partir do map (fora do componente de calendario)
+function medColorStatic(id, medById){
+  const ids = Object.keys(medById).map(Number).sort((a,b)=>a-b);
+  const i = ids.indexOf(id);
+  return MED_CORES[(i<0?0:i) % MED_CORES.length];
 }
 
 // ---------- CALENDARIO ----------
@@ -700,7 +798,7 @@ const MESES = ['janeiro','fevereiro','março','abril','maio','junho','julho','ag
 const HORAS = Array.from({length:12},(_,i)=>i+7); // 7h as 18h
 
 function Calendario({ agend, medicos, medById, medColor, onNovo, onEditar }) {
-  const [modo, setModo] = useState('mes');
+  const [modo, setModo] = useState('semana');
   const [refDate, setRefDate] = useState(new Date());
   const [fMed, setFMed] = useState('');
 
