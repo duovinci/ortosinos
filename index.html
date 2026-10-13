@@ -490,6 +490,17 @@ function App({ user, onLogout }) {
     showToast('Atendimento atualizado');
   }
 
+  async function excluirAtendimento(id){
+    // Remove agendamentos vinculados antes, pra não sobrar consulta órfã no calendário
+    await sb.from('agendamentos').delete().eq('atendimento_id', id);
+    const { error } = await sb.from('atendimentos').delete().eq('id', id);
+    if (error) { showToast('Erro ao excluir'); return; }
+    setAtend(prev => prev.filter(a => a.id !== id));
+    setAgend(prev => prev.filter(a => a.atendimento_id !== id));
+    setModal(null);
+    showToast('Cadastro excluído');
+  }
+
   // Status do bot por numero (bot = respondendo / humano = parado)
   const statusPorNumero = useMemo(() => Object.fromEntries(sessoes.map(s => [s.numero_whatsapp, s.status])), [sessoes]);
 
@@ -604,7 +615,7 @@ function App({ user, onLogout }) {
       {modal?.type==='agendar' && <ModalAgendar medicos={medicos} agend={agend} user={user} base={modal} onClose={()=>setModal(null)} onSave={salvarAgendamento} onCancelar={cancelarAgendamento} />}
       {modal?.type==='paciente' && <ModalPaciente base={modal} agend={agend} medById={medById} readOnly={ehMedico} onClose={()=>setModal(null)} onSave={salvarPaciente} />}
       {modal?.type==='consulta' && <ModalConsulta ev={modal.evento} medById={medById} onClose={()=>setModal(null)} />}
-      {modal?.type==='detalhes' && <ModalDetalhes a={modal.atend} medicos={medicos} medById={medById} statusBot={statusPorNumero[modal.atend.numero_whatsapp]} onAlternarBot={alternarBot} onClose={()=>setModal(null)} onSalvar={salvarAtendimento} onAgendar={(a)=>setModal({type:'agendar', atend:a})} />}
+      {modal?.type==='detalhes' && <ModalDetalhes a={modal.atend} medicos={medicos} medById={medById} statusBot={statusPorNumero[modal.atend.numero_whatsapp]} onAlternarBot={alternarBot} onClose={()=>setModal(null)} onSalvar={salvarAtendimento} onExcluir={excluirAtendimento} onAgendar={(a)=>setModal({type:'agendar', atend:a})} />}
       {toast && <div className="toast">{toast}</div>}
     </div>
   );
@@ -999,20 +1010,22 @@ function DiaView({ refDate, evs, medColor, onNovo }) {
 }
 
 // ---------- MODAL DETALHES DO CARD ----------
-function ModalDetalhes({ a, medicos, medById, statusBot, onAlternarBot, onClose, onSalvar, onAgendar }) {
+function ModalDetalhes({ a, medicos, medById, statusBot, onAlternarBot, onClose, onSalvar, onExcluir, onAgendar }) {
   const [edit, setEdit] = useState(false);
   const [nome, setNome] = useState(a.nome_paciente || '');
   const [medId, setMedId] = useState(a.medico_id || '');
   const [assunto, setAssunto] = useState(a.assunto || 'agendamento');
   const [tipo, setTipo] = useState(a.tipo_paciente || 'novo');
   const [conv, setConv] = useState(a.convenio || 'convenio');
+  const [tel, setTel] = useState(a.numero_whatsapp || '');
+  const [confExcluir, setConfExcluir] = useState(false);
   const parado = statusBot === 'humano';
   const med = medById[a.medico_id];
   const ass = ASSUNTOS[a.assunto] || ASSUNTOS.outro;
   const faseAtual = COLS.find(c => c.key === a.status_pipeline);
 
   function salvar(){
-    onSalvar(a.id, { nome_paciente: nome.trim(), medico_id: medId?+medId:null, assunto, tipo_paciente: tipo, convenio: conv });
+    onSalvar(a.id, { nome_paciente: nome.trim(), medico_id: medId?+medId:null, assunto, tipo_paciente: tipo, convenio: conv, numero_whatsapp: (tel||'').trim() || null });
   }
 
   return (
@@ -1038,11 +1051,26 @@ function ModalDetalhes({ a, medicos, medById, statusBot, onAlternarBot, onClose,
             <>
               <div className="field"><label>Nome do paciente</label><input value={nome} onChange={e=>setNome(e.target.value)} /></div>
               <div className="field"><label>Médico</label><select value={medId} onChange={e=>setMedId(e.target.value)}><option value="">Não definido</option>{medicos.map(m=><option key={m.id} value={m.id}>{m.nome}</option>)}</select></div>
+              <div className="field"><label>Telefone</label><input value={tel} onChange={e=>setTel(e.target.value)} placeholder="Ex: 5551999999999" /></div>
               <div className="row2">
                 <div className="field"><label>Assunto</label><select value={assunto} onChange={e=>setAssunto(e.target.value)}>{Object.entries(ASSUNTOS).map(([k,v])=><option key={k} value={k}>{v.label}</option>)}</select></div>
                 <div className="field"><label>Tipo</label><select value={tipo} onChange={e=>setTipo(e.target.value)}><option value="novo">1ª vez</option><option value="retorno">Retorno</option></select></div>
               </div>
             </>
+          )}
+          {edit && (
+            confExcluir ? (
+              <div style={{marginTop:16,background:'rgba(168,74,91,.08)',border:'1px solid rgba(168,74,91,.3)',borderRadius:10,padding:'12px 14px'}}>
+                <div style={{fontSize:13,color:'var(--rose)',fontWeight:600,marginBottom:4}}>Excluir este cadastro?</div>
+                <div style={{fontSize:12.5,color:'var(--ink-soft)',marginBottom:12}}>Isso remove o atendimento e as consultas vinculadas a ele no calendário. Não dá pra desfazer.</div>
+                <div style={{display:'flex',gap:8}}>
+                  <button className="btn-ghost" style={{flex:1,padding:'9px'}} onClick={()=>setConfExcluir(false)}>Cancelar</button>
+                  <button className="btn-primary" style={{flex:1,padding:'9px',background:'var(--rose)',boxShadow:'none'}} onClick={()=>onExcluir(a.id)}>Excluir de vez</button>
+                </div>
+              </div>
+            ) : (
+              <button className="btn-ghost" style={{width:'100%',marginTop:16,color:'var(--rose)',borderColor:'rgba(168,74,91,.3)'}} onClick={()=>setConfExcluir(true)}>Excluir cadastro</button>
+            )
           )}
           {a.numero_whatsapp && !edit && (
             <div style={{display:'flex',flexDirection:'column',gap:8,marginTop:16}}>
