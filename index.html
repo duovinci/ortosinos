@@ -110,6 +110,9 @@
   .chip { font-size: 11.5px; padding: 2px 8px; border-radius: 6px; background: var(--line-soft); color: var(--ink-soft); font-weight: 500; }
   .chip.ret { background: rgba(31,93,76,.1); color: var(--pine); }
   .chip.pos { background: rgba(194,112,61,.16); color: #a85a28; }
+  .alerta-msg { display: flex; align-items: center; gap: 7px; margin-top: 10px; padding: 7px 10px; border-radius: 8px; background: rgba(168,74,91,.1); border: 1px solid rgba(168,74,91,.28); color: var(--rose); font-size: 12px; font-weight: 600; }
+  .alerta-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--rose); flex-shrink: 0; animation: pulseAlerta 1.4s ease-in-out infinite; }
+  @keyframes pulseAlerta { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
   .lead-time { font-size: 11.5px; color: var(--ink-faint); margin-left: auto; }
   .lead-actions { display: flex; gap: 6px; margin-top: 11px; }
   .mini-btn { flex: 1; font-size: 12px; font-weight: 500; padding: 7px; border-radius: 8px; background: var(--line-soft); color: var(--ink-soft); transition: background .13s, color .13s; }
@@ -512,6 +515,15 @@ function App({ user, onLogout }) {
     showToast('Cadastro excluído');
   }
 
+  // Abre o card e, se tinha alerta de nova mensagem, marca como visto (limpa o alerta)
+  async function abrirDetalhes(a){
+    setModal({ type: 'detalhes', atend: a });
+    if (a.nova_mensagem_em) {
+      setAtend(prev => prev.map(x => x.id===a.id ? {...x, nova_mensagem_em: null} : x));
+      await sb.from('atendimentos').update({ nova_mensagem_em: null }).eq('id', a.id);
+    }
+  }
+
   // Status do bot por numero (bot = respondendo / humano = parado)
   const statusPorNumero = useMemo(() => Object.fromEntries(sessoes.map(s => [s.numero_whatsapp, s.status])), [sessoes]);
 
@@ -621,7 +633,7 @@ function App({ user, onLogout }) {
       </aside>
       <main className="main">
         {loading ? <div className="loading"><div className="spin"></div>Carregando...</div> : (
-          viewAtual==='pipeline' ? <Pipeline atend={atend} medById={medById} medicos={medicos} medColor={medColor} onMove={moverPipeline} onAgendar={(a)=>setModal({type:'agendar', atend:a})} onDetalhes={(a)=>setModal({type:'detalhes', atend:a})} statusPorNumero={statusPorNumero} onAlternarBot={alternarBot} /> :
+          viewAtual==='pipeline' ? <Pipeline atend={atend} medById={medById} medicos={medicos} medColor={medColor} onMove={moverPipeline} onAgendar={(a)=>setModal({type:'agendar', atend:a})} onDetalhes={abrirDetalhes} statusPorNumero={statusPorNumero} onAlternarBot={alternarBot} /> :
           viewAtual==='calendario' ? <Calendario agend={ehMedico?agendMed:agend} medicos={medicos} medById={medById} medColor={medColor} soLeitura={ehMedico} onNovo={(dt)=>{ if(!ehMedico) setModal({type:'agendar', data:dt}); }} onEditar={(ev)=> ehMedico ? setModal({type:'consulta', evento:ev}) : setModal({type:'agendar', evento:ev})} /> :
           <Pacientes pacientes={ehMedico?pacientesMed:pacientes} atend={ehMedico?agendMed:atend} agend={agend} medicos={medicos} readOnly={ehMedico} onNovo={()=>setModal({type:'paciente'})} onEdit={(p)=>setModal({type:'paciente', paciente:p})} />
         )}
@@ -712,6 +724,7 @@ function LeadCard({ a, med, medColor, onAgendar, onDragStart, onDragEnd, draggin
         </div>
         <span className="assunto-tag" style={{background:ass.bg,color:ass.fg}}>{ass.label}</span>
       </div>
+      {a.nova_mensagem_em && <div className="alerta-msg"><span className="alerta-dot"></span>Nova mensagem no WhatsApp</div>}
       <div className="lead-meta">
         <span className={'chip'+(a.tipo_paciente==='retorno'?' ret':a.tipo_paciente==='pos_operatorio'?' pos':'')}>{a.tipo_paciente==='retorno'?'Retorno':a.tipo_paciente==='pos_operatorio'?'Pós-op':'1ª vez'}</span>
         <span className="chip">{a.convenio==='particular'?'Particular':'Convênio'}</span>
